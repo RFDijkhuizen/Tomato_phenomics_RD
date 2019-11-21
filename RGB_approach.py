@@ -50,13 +50,16 @@ def main():
     saturation_higher_tresh = 230       # 230
     value_lower_tresh = 120             # 125
     value_higher_tresh = 255            # 255
+    # RGB color space
     green_lower_tresh = 105             # 110
     green_higher_tresh = 255            # 255
     red_lower_tresh = 22                # 24
-    red_higher_thresh = 98             # 98
+    red_higher_thresh = 98              # 98
     blue_lower_tresh = 85               # 85
     blue_higher_tresh = 253             # 255
-    
+    # CIELAB color space
+    #lab_blue_lower_tresh = 0            # Blue yellow channel
+    #lab_blue_higher_tresh = 255         
     
 
     s = pcv.rgb2gray_hsv(rgb_img=img, channel='h')
@@ -80,20 +83,9 @@ def main():
     mask_old, masked_old = pcv.threshold.custom_range(rgb_img=masked, lower_thresh=[0,0,blue_lower_tresh], upper_thresh=[255,255,blue_higher_tresh], channel='RGB')
     masked = pcv.apply_mask(rgb_img=masked_old, mask = mask_old, mask_color = 'white')
             #filtered on blue
-    ###____________________________________ Blur to minimize 
-    try:
-        s_mblur = pcv.median_blur(gray_img = masked_old, ksize = 3)
-        s = pcv.rgb2gray_hsv(rgb_img=s_mblur, channel='v')
-        mask, masked_image = pcv.threshold.custom_range(rgb_img=s, lower_thresh=[0], upper_thresh=[254], channel='gray')
-    except:
-        print("failed blur step")
-    try:
-        mask = pcv.fill(masked, 10)
-    except:
-        masked = pcv.apply_mask(rgb_img=masked, mask = mask, mask_color = 'white')
-        print("failed fill step")
-
-
+    #b = pcv.rgb2gray_lab(rgb_img = masked, channel = 'b')   # Converting toe CIElab blue_yellow image
+    #b_thresh =pcv.threshold.binary(gray_img = b, threshold=lab_blue_lower_tresh, max_value = lab_blue_higher_tresh)
+    
     ###_____________________________________ Now to identify objects
     masked_a = pcv.rgb2gray_lab(rgb_img=masked, channel='a')
     masked_b = pcv.rgb2gray_lab(rgb_img=masked, channel='b')
@@ -113,7 +105,8 @@ def main():
     # Inputs: 
     #   bin_img - Binary image data 
     #   size - Minimum object area size in pixels (must be an integer), and smaller objects will be filled
-    ab_fill = pcv.fill(bin_img=ab, size=200)
+    ab = pcv.median_blur(gray_img=ab, ksize=3)
+    ab_fill = pcv.fill(bin_img=ab, size=1000)
         #print("filled")
     # Apply mask (for VIS images, mask_color=white)
     masked2 = pcv.apply_mask(rgb_img=masked, mask=ab_fill, mask_color='white')
@@ -400,7 +393,7 @@ def main_side():
     #   img - RGB or grayscale image data 
     #   obj- Single or grouped contour object
     #   mask - Binary image mask to use as mask for moments analysis     
-    shape_img = pcv.analyze_object(img=img, obj=o, mask=mask)
+    shape_img = pcv.analyze_object(img=img, obj=o, mask=m)
     new_im = Image.fromarray(shape_img)
     new_im.save("output//" + args.filename + "shape_img_side.png")
 
