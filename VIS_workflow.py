@@ -19,12 +19,12 @@ class args:
 
 ## Parameters
 "HSV color space"
-saturation_lower_tresh = 130        # 130
+saturation_lower_tresh = 120        # 130
 saturation_higher_tresh = 240       # 240
 hue_lower_tresh = 18                # 18
 hue_higher_tresh = 55               # 55
 value_lower_tresh = 70              # 70
-value_higher_tresh = 250            # 250
+value_higher_tresh = 255            # 250
 HSV_blur_k = 3                      # 3
 "CIELAB color space"
 l_lower_thresh = 130                # 130 Lower light thresh to be considered plant # original 125
@@ -46,11 +46,6 @@ def main():
     # Read image
     img, path, filename = pcv.readimage(filename=args.image)
 
-
-
-
-
-
     #______________________________________________________________#### BEGIN HSV COLORSPACE WORKFLOW ###
     # Convert RGB to HSV and extract the saturation channel
     # Threshold the saturation
@@ -58,14 +53,14 @@ def main():
 
     print("Starting HSV workflow")
     s = pcv.rgb2gray_hsv(rgb_img=img, channel='s')
-    s_thresh = pcv.threshold.binary(gray_img=s, threshold=saturation_lower_tresh, max_value=saturation_higher_tresh, object_type='light')
+    s_thresh, maskeds_image = pcv.threshold.custom_range(rgb_img=s, lower_thresh=[saturation_lower_tresh], upper_thresh=[saturation_higher_tresh], channel='gray')
     print("thresholded on saturation")
     # Threshold the hue
     h = pcv.rgb2gray_hsv(rgb_img=img, channel='h')
-    h_thresh = pcv.threshold.binary(gray_img=h, threshold=hue_lower_tresh, max_value=hue_higher_tresh, object_type='light')
+    h_thresh, maskedh_image = pcv.threshold.custom_range(rgb_img=h, lower_thresh=[hue_lower_tresh], upper_thresh=[hue_higher_tresh], channel='gray')
     print("thresholded on hue")
     v = pcv.rgb2gray_hsv(rgb_img=img, channel='v')
-    v_thresh = pcv.threshold.binary(gray_img=v, threshold=70, max_value=255, object_type='light')
+    v_thresh, maskedv_image = pcv.threshold.custom_range(rgb_img=v, lower_thresh=[value_lower_tresh], upper_thresh=[value_higher_tresh], channel='gray')
     print("thresholded on value")
     # Join saturation, Hue and Value
     sh = pcv.logical_and(bin_img1 = s_thresh, bin_img2 = h_thresh)
@@ -103,16 +98,16 @@ def main():
     masked_b = pcv.rgb2gray_lab(rgb_img=masked, channel='b')
     # Threshold the green-magenta and blue images
     print("LAB threshholds")
-    maskedl_thresh = pcv.threshold.binary(gray_img=masked_l, threshold=l_lower_thresh, max_value=255, object_type='light')
-    maskeda_thresh = pcv.threshold.binary(gray_img=masked_a, threshold=a_lower_thresh_1, max_value=255, object_type='dark')
-    maskeda_thresh1 = pcv.threshold.binary(gray_img=masked_a, threshold=a_lower_thresh_2, max_value=255, object_type='light')
-    maskedb_thresh = pcv.threshold.binary(gray_img=masked_b, threshold=b_lower_thresh_1, max_value=b_higher_thresh_2, object_type='light')
+    maskedl_thresh, maskedl_image = pcv.threshold.custom_range(rgb_img=masked_l, lower_thresh=[120], upper_thresh=[247], channel='gray')
+    maskeda_thresh, maskeda_image = pcv.threshold.custom_range(rgb_img=masked_a, lower_thresh=[0], upper_thresh=[114], channel='gray')
+    maskedb_thresh, maskedb_image = pcv.threshold.custom_range(rgb_img=masked_b, lower_thresh=[130], upper_thresh=[240], channel='gray')
+
 
     # Join the thresholded saturation and blue-yellow images (OR)
     print("Join the thresholds")
     ab1 = pcv.logical_and(bin_img1=maskeda_thresh, bin_img2=maskedb_thresh)
-    ab2 = pcv.logical_and(bin_img1=maskedl_thresh, bin_img2=ab1)
-    ab = pcv.logical_or(bin_img1=maskeda_thresh1, bin_img2=ab2)
+    ab = pcv.logical_and(bin_img1=maskedl_thresh, bin_img2=ab1)
+
 
     # Fill small objects
     ab_fill = pcv.median_blur(gray_img=ab, ksize= LAB_blur_k)
