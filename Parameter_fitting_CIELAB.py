@@ -12,7 +12,7 @@ warnings.filterwarnings('ignore')
 
 ## Parameters
 "HSV color space"
-saturation_lower_tresh = 130         #
+saturation_lower_tresh = 120        #
 saturation_higher_tresh = 255       # 
 hue_lower_tresh = 18                #
 hue_higher_tresh = 55               #
@@ -25,16 +25,16 @@ l_higher_thresh = 255               # Higher thresh to be considered plant.
 a_lower_thresh_1 = 118              # Lower thresh to be considered plant
 a_lower_thresh_2 = 138              # Lower thresh to be considered too magenta to be plant
 b_lower_thresh_1 = 165              # Threshold to filter background away
-b_higher_thresh_1 = 255            # Threshold to filter background away
+b_higher_thresh_1 = 255             # Threshold to filter background away
 b_fill_k = 1000                     # Fill to make sure we do not lose anything
 b_lower_thresh_2 = 120              # Threshold to capture plant
 b_higher_thresh_2 = 255             # Threshold to capture plant
 LAB_fill_k = 1500                   # Fill kernel for the LAB filtered image
-LAB_blur_k = 10                      #Final Blur
+LAB_blur_k = 10                     # Final Blur
 
 
 debug_setting = "None"
-loops = 500 # Amount of loops you try to find better parameters
+loops = 1 # Amount of loops you try to find better parameters
 pixel_match_reward = 1     # The similarity score for when the True positive and test agree on whether a pixel is plant
 pixel_mismatch_penalty = -1 # The similiarity score for when the True positve and test disagree
 # Starting parameters in array
@@ -90,19 +90,24 @@ def test(true_positive_file, test_parameters):
     pcv.params.debug=args.debug #set debug mode
     pcv.params.debug_outdir=args.outdir #set output directory
 
-    # Read image (readimage mode defaults to native but if image is RGBA then specify mode='rgb')
-    # Inputs:
-    #   filename - Image file to be read in 
-    #   mode - Return mode of image; either 'native' (default), 'rgb', 'gray', or 'csv'
-    img, path, filename = pcv.readimage(filename=args.image, mode='rgb')
+    pcv.params.debug = args.debug  # set debug mode
+    pcv.params.debug_outdir = args.outdir  # set output directory
+
+    # Read image
+    img, path, filename = pcv.readimage(filename=args.image)
+
+    #______________________________________________________________#### BEGIN HSV COLORSPACE WORKFLOW ###
+    # Convert RGB to HSV and extract the saturation channel
+    # Threshold the saturation
     
+
     s = pcv.rgb2gray_hsv(rgb_img=img, channel='s')
-    s_thresh = pcv.threshold.binary(gray_img=s, threshold=saturation_lower_tresh, max_value=saturation_higher_tresh, object_type='light')
+    s_thresh, maskeds_image = pcv.threshold.custom_range(rgb_img=s, lower_thresh=[saturation_lower_tresh], upper_thresh=[saturation_higher_tresh], channel='gray')
     # Threshold the hue
     h = pcv.rgb2gray_hsv(rgb_img=img, channel='h')
-    h_thresh = pcv.threshold.binary(gray_img=h, threshold=hue_lower_tresh, max_value=hue_higher_tresh, object_type='light')
+    h_thresh, maskedh_image = pcv.threshold.custom_range(rgb_img=h, lower_thresh=[hue_lower_tresh], upper_thresh=[hue_higher_tresh], channel='gray')
     v = pcv.rgb2gray_hsv(rgb_img=img, channel='v')
-    v_thresh = pcv.threshold.binary(gray_img=v, threshold=value_lower_tresh, max_value=value_higher_tresh, object_type='light')
+    v_thresh, maskedv_image = pcv.threshold.custom_range(rgb_img=v, lower_thresh=[value_lower_tresh], upper_thresh=[value_higher_tresh], channel='gray')
     # Join saturation, Hue and Value
     sh = pcv.logical_and(bin_img1 = s_thresh, bin_img2 = h_thresh)
     hsv = pcv.logical_and(bin_img1 = sh, bin_img2=v_thresh)
@@ -133,38 +138,34 @@ def test(true_positive_file, test_parameters):
     masked_a = pcv.rgb2gray_lab(rgb_img=masked, channel='a')
     masked_b = pcv.rgb2gray_lab(rgb_img=masked, channel='b')
     # Threshold the green-magenta and blue images
-    maskedl_thresh = pcv.threshold.binary(gray_img=masked_l, threshold=l_lower_thresh, max_value=255, object_type='light')
-    maskeda_thresh = pcv.threshold.binary(gray_img=masked_a, threshold=a_lower_thresh_1, max_value=255, object_type='dark')
-    maskeda_thresh1 = pcv.threshold.binary(gray_img=masked_a, threshold=a_lower_thresh_2, max_value=255, object_type='light')
-    maskedb_thresh = pcv.threshold.binary(gray_img=masked_b, threshold=b_lower_thresh_2, max_value=b_higher_thresh_2, object_type='light')
-    mask, masked_image = pcv.threshold.custom_range(rgb_img=s, lower_thresh=[saturation_lower_tresh], upper_thresh=[saturation_higher_tresh], channel='gray')
-    print("mask, masked image")
+    maskedl_thresh, maskedl_image = pcv.threshold.custom_range(rgb_img=masked_l, lower_thresh=[120], upper_thresh=[247], channel='gray')
+    maskeda_thresh, maskeda_image = pcv.threshold.custom_range(rgb_img=masked_a, lower_thresh=[0], upper_thresh=[114], channel='gray')
+    maskedb_thresh, maskedb_image = pcv.threshold.custom_range(rgb_img=masked_b, lower_thresh=[130], upper_thresh=[240], channel='gray')
+
 
     # Join the thresholded saturation and blue-yellow images (OR)
     ab1 = pcv.logical_and(bin_img1=maskeda_thresh, bin_img2=maskedb_thresh)
-    ab2 = pcv.logical_and(bin_img1=maskedl_thresh, bin_img2=ab1)
-    ab = pcv.logical_or(bin_img1=maskeda_thresh1, bin_img2=ab2)
+    ab = pcv.logical_and(bin_img1=maskedl_thresh, bin_img2=ab1)
 
     # Fill small objects
     ab_fill = pcv.median_blur(gray_img=ab, ksize= LAB_blur_k)
     ab_fill = pcv.fill(bin_img=ab_fill, size=LAB_fill_k)
     # Apply mask (for VIS images, mask_color=white)
     masked2 = pcv.apply_mask(rgb_img=masked, mask=ab_fill, mask_color='white')
-
+    
     # Identify objects
     id_objects, obj_hierarchy = pcv.find_objects(img=masked2, mask=ab_fill)
-
+    
     # Define ROI
     roi1, roi_hierarchy= pcv.roi.rectangle(img=masked2, x=0, y=0, h=960, w=1280)
-
+    
     # Decide which objects to keep
-    with HiddenPrints():
-        roi_objects, hierarchy3, kept_mask, obj_area = pcv.roi_objects(img=img, roi_contour=roi1, 
+    roi_objects, hierarchy3, kept_mask, obj_area = pcv.roi_objects(img=img, roi_contour=roi1, 
                                                                    roi_hierarchy=roi_hierarchy, 
                                                                    object_contour=id_objects, 
                                                                    obj_hierarchy=obj_hierarchy,
-                                                                   roi_type=roi_type)
-
+                                                                   roi_type='partial')
+    
         # Object combine kept objects
     obj, mask = pcv.object_composition(img=img, contours=roi_objects, hierarchy=hierarchy3)
     
