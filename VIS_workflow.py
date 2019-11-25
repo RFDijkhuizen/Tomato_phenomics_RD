@@ -158,9 +158,9 @@ def main():
         new_im = Image.fromarray(shape_img)
         new_im.save("output//" + args.filename + "shape_img.png")
         GT = re.sub(pattern, replacement, filename)
-        pcv.outputs.add_observation(variable = "Genotype", trait = "The genotype",
+        pcv.outputs.add_observation(variable = "genotype", trait = "The genotype",
                                     method = "Regexed from the filename", scale = None,
-                                    datatype = str, value = GT, label = "Genotype")
+                                    datatype = str, value = int(GT), label = "GT")
         
         # Write shape and color data to results file
         pcv.print_results(filename=args.result)
@@ -170,7 +170,7 @@ def main():
 
 # Calling functions # subset
     
-do_subset = True
+do_subset = False
 if do_subset == True:
     wd = os.getcwd()
     top_files = []          # absolute paths uses for processing
@@ -198,7 +198,7 @@ if do_subset == True:
         print("handled top picture %i of %i" %(file_counter, len(top_files)))
   
     
-do_all = False
+do_all = True
 if do_all == True:      
     wd = os.getcwd()
     args.debug = "None"
@@ -216,7 +216,7 @@ if do_all == True:
         side_files.append(os.path.join(wd, item))
         
     file_counter = 0
-    for item in top_files[0:25]:
+    for item in top_files:
         args.image = item
         args.outdir = "C:\\Users\\RensD\\OneDrive\\studie\\Master\\The_big_project\\output\\"
         args.result = "output//" + top_files_names[file_counter][0:-4] + "top_results.txt"
