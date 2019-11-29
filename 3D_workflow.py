@@ -3,10 +3,13 @@ from PIL import Image, ImageDraw
 from plantcv import plantcv as pcv
 import glob
 import os
+import re
 
 # Parameters
 height = 200    # The boundary a plant should always fit in
 width = 200     # The boundary a plant should always fit in
+pattern = ".*- (\d+)_\d_3D.csv"     # Pattern to get your genotype from filename
+replacement = "\g<1>"               # Replacement regex to get your genotype
 
 class args:
     image = ""
@@ -24,7 +27,7 @@ def silhouette_top():
     image_top = Image.new("RGB", (width, height), color = 'white')
     draw = ImageDraw.Draw(image_top)
     data_3d = open(args.image, "r")
-    
+    orignal_file = args.image
     for line in data_3d:
         line = line.split(",")
         y.append(int(line[0]))
@@ -82,12 +85,18 @@ def silhouette_top():
     # Shape properties relative to user boundary line (optional)
     boundary_img1 = pcv.analyze_bound_horizontal(img=img, obj=obj, mask=mask, line_position=1680)
     new_im = Image.fromarray(boundary_img1)
-    new_im.save("subset//" + args.filename + "3D_top_boundary.png")
+    new_im.save("output//" + args.filename + "_top_boundary.png")
 
     # Find shape properties, output shape image (optional)
     shape_img = pcv.analyze_object(img=img, obj=obj, mask=mask)
     new_im = Image.fromarray(shape_img)
-    new_im.save("subset//" + args.filename + "3D_top_shape.png")
+    new_im.save("output//" + args.filename + "_top_shape.png")
+    
+    new_im.save("output//" + args.filename + "shape_img.png")
+    GT = re.sub(pattern, replacement, files_names[file_counter])
+    pcv.outputs.add_observation(variable = "genotype", trait = "genotype",
+                                method = "Regexed from the filename", scale = None,
+                                datatype = str, value = int(GT), label = "GT")
     
     # Write shape and color data to results file
     pcv.print_results(filename=args.result)
@@ -125,12 +134,17 @@ def silhouette_top():
     # Shape properties relative to user boundary line (optional)
     boundary_img1 = pcv.analyze_bound_horizontal(img=img, obj=obj, mask=mask, line_position=1680)
     new_im = Image.fromarray(boundary_img1)
-    new_im.save("subset//" + args.filename + "3D_side_boundary.png")
+    new_im.save("output//" + args.filename + "_side_boundary.png")
 
     # Find shape properties, output shape image (optional)
     shape_img = pcv.analyze_object(img=img, obj=obj, mask=mask)
     new_im = Image.fromarray(shape_img)
-    new_im.save("subset//" + args.filename + "3D_side_shape.png")
+    new_im.save("output//" + args.filename + "_side_shape.png")
+    
+    GT = re.sub(pattern, replacement, files_names[file_counter])
+    pcv.outputs.add_observation(variable = "genotype", trait = "genotype",
+                                method = "Regexed from the filename", scale = None,
+                                datatype = str, value = int(GT), label = "GT")
     
     # Write shape and color data to results file
     pcv.print_results(filename=args.result_side)
@@ -165,7 +179,7 @@ if do_all == True:
     args.debug = "None"
     files = []          # absolute paths uses for processing
     files_names = []    # The names used for storing 
-    temp = glob.glob("subset//*3D.csv")
+    temp = glob.glob("top_input//*3D.csv")
     for item in temp:
         files_names.append(os.path.basename(item))
         files.append(os.path.join(wd, item))
