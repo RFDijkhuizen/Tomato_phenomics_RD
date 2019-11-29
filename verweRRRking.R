@@ -2,10 +2,15 @@ library(rjson)
 library(stringr)
 library(ggplot2)
 
-## load one file
+## Load data
 setwd("~/studie/master/data/")
 
 ## get data
+file.list <- list.files("output_lab/")
+file.list <- file.list[grep("results.txt",file.list)]
+
+## Load data home pc
+setwd("C:/Users/Rens Dijkhuizen/OneDrive/studie/Master/The_big_project")
 file.list <- list.files("output_lab/")
 file.list <- file.list[grep("results.txt",file.list)]
 
@@ -35,8 +40,17 @@ pheno.collect[1:5,1:5]
 pheno.collect <- data.frame(pheno.collect)
 
 ### Remove unnesecarry rows
+# Get the index of elements we want to remove for now.
+index_counter <- 1
+index_list <- vector()
+for (element in trait.list){
+  if (str_sub(element,-11,-1) == "frequencies"){
+   index_list <- c(index_list, index_counter)
+  }
+  index_counter <- index_counter + 1
+}
 
-
+pheno.collect <- pheno.collect[,-(index_list)]
 
 
 ### RANDOM NICE PLOTS
