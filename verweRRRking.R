@@ -1,6 +1,7 @@
 library(rjson)
 library(stringr)
 library(ggplot2)
+library(alphashape3d)
 
 ############################################################# TOP PERSPECTIVE
 ## Load data
@@ -52,7 +53,6 @@ pheno.collect <- pheno.collect[,-(index_list)]
 ### RANDOM NICE PLOTS
 plot(pheno.collect$area.above.reference)
 plot(pheno.collect$area)
-print(pheno.collect)
 
 boxplot(area ~ genotype, data= pheno.collect)
 boxplot(solidity ~ genotype, data= pheno.collect)
@@ -108,7 +108,6 @@ pheno.collect <- pheno.collect[,-(index_list)]
 ### RANDOM NICE PLOTS
 plot(pheno.collect$area.above.reference)
 plot(pheno.collect$area)
-print(pheno.collect)
 
 boxplot(area ~ genotype, data= pheno.collect)
 boxplot(solidity ~ genotype, data= pheno.collect)
@@ -164,8 +163,22 @@ pheno.collect <- pheno.collect[,-(index_list)]
 ### RANDOM NICE PLOTS
 plot(pheno.collect$area.above.reference)
 plot(pheno.collect$area)
-print(pheno.collect)
 
 boxplot(area ~ genotype, data= pheno.collect)
 boxplot(solidity ~ genotype, data= pheno.collect)
 qplot(geom = 'boxplot',genotype, area, data = pheno.collect)
+
+
+
+
+
+
+
+
+############### Volume thingy
+punten <- read.csv("C:/Users/RensD/Documents/studie/master/Offline_version/top_input/0004_2018-02-21 13.44 - 21_0_3D.csv")
+View(punten)
+x <- cbind(punten[,1], punten[,2], punten[,3])
+ashape3d.obj <- ashape3d(x, alpha = 0.75, pert = TRUE)
+plot(ashape3d.obj, byComponents = TRUE)
+volume_ashape3d(ashape3d.obj, byComponents = TRUE)
