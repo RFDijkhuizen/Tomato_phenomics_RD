@@ -13,7 +13,7 @@ import re
 
 class args:
     image = ""
-    outdir = "C:\\Users\\Rens Dijkhuizen\\OneDrive\\studie\\Master\\The_big_project\\output"
+    outdir = "/output/"
     debug = "None"
     result = ""
     filename = ""
@@ -54,9 +54,9 @@ class HiddenPrints:                                # To surpress unnecessary war
         sys.stdout.close()
         sys.stdout = self._original_stdout
 
-### Main workflow
+### Main workflow##############################################################################################################
 "Main() is the workflow for the colored top pictures"     
-###
+###############################################################################################################################
 def main():
     pcv.params.debug = args.debug  # set debug mode
     pcv.params.debug_outdir = args.outdir  # set output directory
@@ -152,8 +152,9 @@ def main():
             ############### Analysis ################
         
         outfile=args.outdir+"/"+filename
-            # Pseudocolor the grayscale image
-        pseudocolored_img = pcv.visualize.pseudocolor(gray_img=s, mask=kept_mask, cmap='jet')
+        # Pseudocolor the grayscale image
+        # Turn pseudocolored img off to prevent unnecessary output
+        #pseudocolored_img = pcv.visualize.pseudocolor(gray_img=s, mask=kept_mask, cmap='jet')
         
         # Shape properties relative to user boundary line (optional)
         boundary_img1 = pcv.analyze_bound_horizontal(img=img, obj=obj, mask=mask, line_position=1680)
@@ -165,7 +166,7 @@ def main():
         #new_im = Image.fromarray(color_img)
         #new_im.save(args.filename + "color_img.png")
         
-        color_histogram = pcv.analyze_color(rgb_img=img, mask=kept_mask, hist_plot_type='all')
+        #color_histogram = pcv.analyze_color(rgb_img=img, mask=kept_mask, hist_plot_type='all')
         
         # Find shape properties, output shape image (optional)
         shape_img = pcv.analyze_object(img=img, obj=obj, mask=mask)
@@ -184,12 +185,13 @@ def main():
     except:
         print("not enough plant material found")
 
-### Main workflow
+### Side workflow###################################################################################################################
 "MainSide() is the workflow for the grayscale sidepictures"     
-###
+####################################################################################################################################
 
 def main_side():
     # Setting "args"
+    fill_k_side = 1000
     pcv.params.debug=args.debug #set debug mode
     pcv.params.debug_outdir=args.outdir #set output directory
 
@@ -206,7 +208,8 @@ def main_side():
     lp_img = pcv.laplace_filter(gray_img=img, ksize=1, scale=1)
     
     # Plot histogram of grayscale values 
-    pcv.visualize.histogram(gray_img=lp_img)
+    # Turn this off to ease graphical output
+    #pcv.visualize.histogram(gray_img=lp_img)
 
     # Lapacian image sharpening, this step will enhance the darkness of the edges detected
     lp_shrp_img = pcv.image_subtract(gray_img1=img, gray_img2=lp_img)
@@ -225,7 +228,7 @@ def main_side():
     sb_img = pcv.image_add(gray_img1=sbx_img, gray_img2=sby_img)
     
     # Use a lowpass (blurring) filter to smooth sobel image
-    mblur_img = pcv.median_blur(gray_img=sb_img, ksize=1)
+    mblur_img = pcv.median_blur(gray_img=sb_img, ksize=3)
     mblur_invert_img = pcv.invert(gray_img=mblur_img)
 
     # combine the smoothed sobel image with the laplacian sharpened image
@@ -254,8 +257,8 @@ def main_side():
                                                                       p2=(1279,959))
     bx12_img = pcv.logical_or(bin_img1=box1_img, bin_img2=box2_img)
     inv_bx1234_img = bx12_img # we dont invert
-    inv_bx1234_img = bx12_img
-    #inv_bx1234_img = pcv.invert(gray_img=bx12_img)
+    inv_bx1234_img = pcv.fill(bin_img=inv_bx1234_img, size = fill_k_side)
+
 
     edge_masked_img = pcv.apply_mask(rgb_img=masked_erd, mask=inv_bx1234_img, 
                                      mask_color='black')
@@ -292,19 +295,14 @@ def main_side():
     shape_img = pcv.analyze_object(img=img, obj=o, mask=m)
     new_im = Image.fromarray(shape_img)
     new_im.save("output//" + args.filename + "shape_img_side.png")
-
     nir_hist = pcv.analyze_nir_intensity(gray_img=img, mask=kept_mask, 
                                          bins=256, histplot=True)
 
     # Pseudocolor the grayscale image to a colormap
-    pseudocolored_img = pcv.visualize.pseudocolor(gray_img=img, mask=kept_mask, cmap='viridis')
+    # Turn pseudocolored img off to prevent unnecessary output
+    #pseudocolored_img = pcv.visualize.pseudocolor(gray_img=img, mask=kept_mask, cmap='viridis')
 
-    # Perform shape analysis
-    shape_imgs = pcv.analyze_object(img=rgb_img, obj=o, mask=m)
 
-    # Find and annotate genotype
-    new_im = Image.fromarray(shape_img)
-    new_im.save("output//" + args.filename + "shape_img.png")
     GT = re.sub(pattern, replacement, filename)
     pcv.outputs.add_observation(variable = "genotype", trait = "genotype",
                                 method = "Regexed from the filename", scale = None,
@@ -314,16 +312,17 @@ def main_side():
     pcv.print_results(filename=args.result)
 
 
-def silhouette_top():
+### 3D workflow###################################################################################################################
+"Silhouette_top() is the workflow for the 3d DATA"     
+##################################################################################################################################
+def workflow_3d():
     "First we draw the picture from the 3D data"
-    ########################################################################################################################################################################
     x = []
     y = []
     z = []
     image_top = Image.new("RGB", (width, height), color = 'white')
     draw = ImageDraw.Draw(image_top)
     data_3d = open(args.image, "r")
-    orignal_file = args.image
     for line in data_3d:
         line = line.split(",")
         y.append(int(line[0]))
@@ -336,9 +335,9 @@ def silhouette_top():
         draw.rectangle([point_x, point_y, point_x + 1, point_y + 1], fill = "black")
         #rectange takes input [x0, y0, x1, y1]
         i += 1
-    image_top.save("top_temp.png")
+    image_top.save("output//" + args.filename + "top_3D.png")
     
-    image_side = Image.new("RGB", (1280, 960), color = 'white')
+    image_side = Image.new("RGB", (width, height), color = 'white')
     draw = ImageDraw.Draw(image_side)
     i = 0
     for point_y in y:
@@ -346,10 +345,12 @@ def silhouette_top():
         draw.rectangle([point_z, point_y, point_z + 1, point_y + 1], fill = "black")
         #rectange takes input [x0, y0, x1, y1]
         i += 1
-    image_side.save("side_temp.png")
-    ########################################################################################################################################################################
+    image_side = image_side.rotate(90)
+    image_side.save("output//" + args.filename + "side_3D.png")
     
-    args.image = "top_temp.png"
+                                                # We have now drawn the images, time to move on to analysis
+    
+    args.image = "output//" + args.filename + "top_3D.png"
     # Get options
     pcv.params.debug=args.debug #set debug mode
     pcv.params.debug_outdir=args.outdir #set output directory
@@ -396,9 +397,10 @@ def silhouette_top():
     
     # Write shape and color data to results file
     pcv.print_results(filename=args.result)
-    ##########################################################################################################################################
+    
+                                                # Now do approximately the same for the side pic
 
-    args.image = "side_temp.png"
+    args.image = ("output//" + args.filename + "side_3D.png")
     # Get options
     pcv.params.debug=args.debug #set debug mode
     pcv.params.debug_outdir=args.outdir #set output directory
@@ -439,17 +441,19 @@ def silhouette_top():
     
     GT = re.sub(pattern_3d_file, replacement, files_names[file_counter])
 
-    #pcv.outputs.add_observation(variable = "genotype", trait = "genotype",
-    #                            method = "Regexed from the filename", scale = None,
-    #                            datatype = str, value = int(GT), label = "GT")
-    # Write shape and color data to results file
+    pcv.outputs.add_observation(variable = "genotype", trait = "genotype",
+                                method = "Regexed from the filename", scale = None,
+                                datatype = str, value = int(GT), label = "GT")
+    #Write shape and color data to results file
     pcv.print_results(filename=args.result_side)
 
 
 
 
 
-# Calling functions # subset
+### Test on subset ###############################################################################################################
+"To test on a subset set do_subset to True, and do_all to False"  
+##################################################################################################################################
 do_subset = False
 if do_subset == True:
     wd = os.getcwd()
@@ -470,8 +474,9 @@ if do_subset == True:
     for item in top_files:
         args.image = item
         args.debug = "plot"
-        args.outdir = "C:\\Users\\Rens Dijkhuizen\\OneDrive\\studie\\Master\\The_big_project\\subset\\"
-        args.result = "subset//" + top_files_names[file_counter][0:-4] + "top_results.txt"
+        #args.outdir = "C:\\Users\\RensD\\OneDrive\\studie\\Master\\The_big_project\\subset\\"
+        args.outdir = "/subset/"
+        args.result = "subset/" + top_files_names[file_counter][0:-4] + "top_results.txt"
         args.filename = top_files_names[file_counter][0:-4]
         main()
         file_counter += 1
@@ -489,38 +494,41 @@ if do_subset == True:
     for item in files:
         args.image = item
         args.debug = "None"
-        args.outdir = "C:\\Users\\RensD\\OneDrive\\studie\\Master\\The_big_project\\subset\\"
+        #args.outdir = "C:\\Users\\RensD\\OneDrive\\studie\\Master\\The_big_project\\subset\\"
+        args.outdir = "/subset/"
         args.result = "subset//" + files_names[file_counter][0:-4] + "silhouette_results.txt"
         args.result_side = "output//" + files_names[file_counter][0:-4] + "_side_results.txt"
         args.filename = files_names[file_counter][0:-4]
-        silhouette_top()
+        workflow_3d()
         file_counter += 1
         print("handled top picture %i of %i" %(file_counter, len(files)))
     
+### Do on all data ###############################################################################################################
+"To perform the script on all data set do_all to True and do_subset to False"  
+##################################################################################################################################
     
-    
-    
-do_all = True 
+do_all = True
 if do_all == True:      
     wd = os.getcwd()
     args.debug = "None"
     top_files = []          # absolute paths uses for processing
     top_files_names = []    # The names used for storing 
-    temp = glob.glob("top_input//*cam9.png")
+    temp = glob.glob("input//*cam9.png")
     for item in temp:
         top_files_names.append(os.path.basename(item))
         top_files.append(os.path.join(wd, item))
     side_files = []          # absolute paths uses for processing
     side_files_names = []    # The names used for storing 
-    temp = glob.glob("side_input//*cam0.png")
+    temp = glob.glob("input//*cam0.png")
     for item in temp:
         side_files_names.append(os.path.basename(item))
         side_files.append(os.path.join(wd, item))
+
         
     file_counter = 0
     for item in top_files:
         args.image = item
-        args.outdir = "C:\\Users\\Rens Dijkhuizen\\OneDrive\\studie\\Master\\The_big_project\\output\\"
+        args.outdir = "/output/"
         args.result = "output//" + top_files_names[file_counter][0:-4] + "top_results.txt"
         args.filename = top_files_names[file_counter][0:-4]
         main()
@@ -530,8 +538,9 @@ if do_all == True:
     file_counter = 0
     for item in side_files:
         args.image = item
-        background = "C:\\Users\\RensD\\OneDrive\\studie\\Master\\The_big_project\\side_perspective\\background.png"
-        args.outdir = "C:\\Users\\RensD\\OneDrive\\studie\\Master\\The_big_project\\output\\"
+        #background = "C:\\Users\\RensD\\OneDrive\\studie\\Master\\The_big_project\\side_perspective\\background.png"
+        background = "background.png"
+        args.outdir = "/output/"
         args.writeimg = True
         args.result = "output//" + side_files_names[file_counter][0:-4] + "side_results.txt"
         args.filename = side_files_names[file_counter][0:-4]
@@ -540,10 +549,9 @@ if do_all == True:
         file_counter += 1
         
     # Now the 3D workflow
-    args.debug = "None"
     files = []          # absolute paths uses for processing
     files_names = []    # The names used for storing 
-    temp = glob.glob("top_input//*3D.csv")
+    temp = glob.glob("input//*3D.csv")
     for item in temp:
         files_names.append(os.path.basename(item))
         files.append(os.path.join(wd, item))
@@ -552,11 +560,11 @@ if do_all == True:
     file_counter = 0
     for item in files:
         args.image = item
-        args.outdir = "C:\\Users\\RensD\\OneDrive\\studie\\Master\\The_big_project\\output\\"
+        args.outdir = "/output/"
         args.result = "output//" + files_names[file_counter][0:-4] + "_top_results.txt"
         args.result_side = "output//" + files_names[file_counter][0:-4] + "_side_results.txt"
         args.filename = files_names[file_counter][0:-4]
-        silhouette_top()
+        workflow_3d()
         file_counter += 1
         print("handled dataset %i of %i" %(file_counter, len(files)))
         
