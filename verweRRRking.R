@@ -5,8 +5,8 @@ library(alphashape3d)
 
 ############################################################# TOP PERSPECTIVE RGB IMAGE
 ## Load data
-setwd("~/studie/master/data/")
-
+setwd("~/Big_project")
+  
 ## get data
 file.list <- list.files("output/")
 file.list <- file.list[grep("cam9top_results.txt",file.list)]
@@ -55,14 +55,14 @@ plot(pheno.collect$area.above.reference)
 plot(pheno.collect$area)
 
 boxplot(area ~ genotype, data= pheno.collect)
-boxplot(solidity ~ genotype, data= pheno.collect)
+boxplot(solidity ~ genotype, data= pheno.collect, notch = TRUE )
 qplot(geom = 'boxplot',genotype, area, data = pheno.collect)
 
 
 
 ##################################################################################### TOP perspective 3D data
 ## Load data
-setwd("~/studie/master/data/")
+setwd("~/Big_project")
 
 ## get data
 file.list <- list.files("output/")
@@ -115,6 +115,7 @@ boxplot(pheno.collect$convex.hull.area ~  pheno.collect$genotype)
 boxplot(pheno.collect$perimeter ~  pheno.collect$genotype)
 boxplot(pheno.collect$longest.path ~  pheno.collect$genotype)
 boxplot(pheno.collect$width ~  pheno.collect$genotype)
+boxplot(pheno.collect$ellipse.major.axis.length ~ pheno.collect$genotype)
 
 boxplot(area ~ genotype, data= pheno.collect)
 boxplot(solidity ~ genotype, data= pheno.collect)
@@ -122,7 +123,7 @@ qplot(geom = 'boxplot',genotype, area, data = pheno.collect)
 
 ############################################################# SIDE PERSPECTIVE RGB IMAGE
 ## Load data
-setwd("~/studie/master/data/")
+setwd("~/Big_project")
 
 ## get data
 file.list <- list.files("output/")
@@ -179,7 +180,7 @@ qplot(geom = 'boxplot',genotype, area, data = pheno.collect)
 
 ############################################################# SIDE PERSPECTIVE 3D data
 ## Load data
-setwd("~/studie/master/data/")
+setwd("~/Big_project")
 
 ## get data
 file.list <- list.files("output/")
@@ -223,6 +224,7 @@ for (element in trait.list){
 pheno.collect <- pheno.collect[,-(index_list)]
 
 
+
 ### RANDOM NICE PLOTS
 plot(pheno.collect$area.above.reference)
 plot(pheno.collect$area)
@@ -231,7 +233,7 @@ boxplot(area ~ genotype, data= pheno.collect)
 boxplot(solidity ~ genotype, data= pheno.collect)
 boxplot(pheno.collect$longest.path ~ pheno.collect$genotype)
 boxplot(pheno.collect$height ~ pheno.collect$genotype)
-  qplot(geom = 'boxplot',genotype, area, data = pheno.collect)
+qplot(geom = 'boxplot',genotype, area, data = pheno.collect)
 
 
 ############### Volume thingy
