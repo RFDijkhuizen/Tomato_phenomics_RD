@@ -298,6 +298,9 @@ def main_side():
     nir_hist = pcv.analyze_nir_intensity(gray_img=img, mask=kept_mask, 
                                          bins=256, histplot=True)
 
+    top, bottom, center_v = pcv.x_axis_pseudolandmarks(img, o, mask)
+    left, right, center_h  = pcv.y_axis_pseudolandmarks(img, o, mask)  # This makes everything crash and explode
+
     # Pseudocolor the grayscale image to a colormap
     # Turn pseudocolored img off to prevent unnecessary output
     #pseudocolored_img = pcv.visualize.pseudocolor(gray_img=img, mask=kept_mask, cmap='viridis')
@@ -332,7 +335,7 @@ def workflow_3d():
     i = 0
     for point_x in x:
         point_y = y[i]
-        draw.rectangle([point_x, point_y, point_x + 1, point_y + 1], fill = "black")
+        draw.rectangle([point_x, point_y, point_x, point_y], fill = "black")
         #rectange takes input [x0, y0, x1, y1]
         i += 1
     image_top.save("output//" + args.filename + "top_3D.png")
@@ -342,7 +345,7 @@ def workflow_3d():
     i = 0
     for point_y in y:
         point_z = z[i]
-        draw.rectangle([point_z, point_y, point_z + 1, point_y + 1], fill = "black")
+        draw.rectangle([point_z, point_y, point_z, point_y], fill = "black")
         #rectange takes input [x0, y0, x1, y1]
         i += 1
     image_side = image_side.rotate(90)
@@ -379,6 +382,26 @@ def workflow_3d():
     obj, mask = pcv.object_composition(img=img, contours=roi_objects, hierarchy=hierarchy3)
     outfile=args.outdir+"/"+filename
         
+    skeleton = pcv.morphology.skeletonize(mask)
+    new_im = Image.fromarray(skeleton)
+    new_im.save("output//" + args.filename + "_top_skeleton.png")
+    
+    segmented_img, segmented_obj = pcv.morphology.segment_skeleton(skel_img=skeleton)
+    new_im = Image.fromarray(segmented_img)
+    new_im.save("output//" + args.filename + "top_segmented_skeleton.png")
+    
+    cycle_img = pcv.morphology.check_cycles(skel_img=skeleton)
+    new_im = Image.fromarray(cycle_img)
+    new_im.save("output//" + args.filename + "top_cycle_skeleton.png")
+
+    seg_angle_img = pcv.morphology.segment_angle(segmented_img, segmented_obj)
+    new_im = Image.fromarray(seg_angle_img)
+    new_im.save("output//" + args.filename + "top_seg_angle.png")
+
+    path_length_img = pcv.morphology.segment_path_length(segmented_img, segmented_obj)
+    new_im = Image.fromarray(path_length_img)
+    new_im.save("output//" + args.filename + "top_seg_length.png")
+    
     # Shape properties relative to user boundary line (optional)
     boundary_img1 = pcv.analyze_bound_horizontal(img=img, obj=obj, mask=mask, line_position=1680)
     new_im = Image.fromarray(boundary_img1)
@@ -389,7 +412,16 @@ def workflow_3d():
     new_im = Image.fromarray(shape_img)
     new_im.save("output//" + args.filename + "_top_shape.png")
     
-    new_im.save("output//" + args.filename + "shape_img.png")
+    # Find all leaf tips
+    #point_img = pcv.acute_vertex(img, obj, 30, 15, 100) Does currently not work 
+    #new_im = Image.fromarray(point_img)
+    #new_im.save("output//" + args.filename + "_point_img.png")
+    
+    # Watershed image to find all leafs
+    analysis_image = pcv.watershed_segmentation(img, mask, 8)
+    new_im = Image.fromarray(analysis_image)
+    new_im.save("output//" + args.filename + "_leaves.png")
+        
     GT = re.sub(pattern_3d_file, replacement, files_names[file_counter])
     pcv.outputs.add_observation(variable = "genotype", trait = "genotype",
                                 method = "Regexed from the filename", scale = None,
@@ -397,8 +429,7 @@ def workflow_3d():
     
     # Write shape and color data to results file
     pcv.print_results(filename=args.result)
-    
-                                                # Now do approximately the same for the side pic
+    #   #   #   #   #   #   #   #   #   #    # Now do approximately the same for the side pic
 
     args.image = ("output//" + args.filename + "side_3D.png")
     # Get options
@@ -428,7 +459,30 @@ def workflow_3d():
     
     obj, mask = pcv.object_composition(img=img, contours=roi_objects, hierarchy=hierarchy3)
     outfile=args.outdir+"/"+filename
-        
+    
+    skeleton = pcv.morphology.skeletonize(mask)
+    new_im = Image.fromarray(skeleton)
+    new_im.save("output//" + args.filename + "_side_skeleton.png")
+
+    segmented_img, segmented_obj = pcv.morphology.segment_skeleton(skel_img=skeleton)
+    new_im = Image.fromarray(segmented_img)
+    new_im.save("output//" + args.filename + "side_segmented_skeleton.png")
+    
+    cycle_img = pcv.morphology.check_cycles(skel_img=skeleton)
+    new_im = Image.fromarray(cycle_img)
+    new_im.save("output//" + args.filename + "side_cycle_skeleton.png")
+    
+    seg_angle_img = pcv.morphology.segment_angle(segmented_img, segmented_obj)
+    new_im = Image.fromarray(seg_angle_img)
+    new_im.save("output//" + args.filename + "side_seg_angle.png")
+    
+    path_length_img = pcv.morphology.segment_path_length(segmented_img, segmented_obj)
+    new_im = Image.fromarray(path_length_img)
+    new_im.save("output//" + args.filename + "side_seg_length.png")
+    
+
+
+    
     # Shape properties relative to user boundary line (optional)
     boundary_img1 = pcv.analyze_bound_horizontal(img=img, obj=obj, mask=mask, line_position=1680)
     new_im = Image.fromarray(boundary_img1)
@@ -439,8 +493,12 @@ def workflow_3d():
     new_im = Image.fromarray(shape_img)
     new_im.save("output//" + args.filename + "_side_shape.png")
     
-    GT = re.sub(pattern_3d_file, replacement, files_names[file_counter])
+    # Find all leaf tips
+    #point_img = pcv.acute_vertex(img, obj, 30, 5, 100) Does currently not work 
 
+
+    
+    GT = re.sub(pattern_3d_file, replacement, files_names[file_counter])
     pcv.outputs.add_observation(variable = "genotype", trait = "genotype",
                                 method = "Regexed from the filename", scale = None,
                                 datatype = str, value = int(GT), label = "GT")
@@ -510,7 +568,7 @@ if do_subset == True:
 do_all = True
 if do_all == True:      
     wd = os.getcwd()
-    args.debug = "None"
+    args.debug = "Plot"
     top_files = []          # absolute paths uses for processing
     top_files_names = []    # The names used for storing 
     temp = glob.glob("input//*cam9.png")
@@ -526,7 +584,7 @@ if do_all == True:
 
         
     file_counter = 0
-    for item in top_files:
+    for item in top_files[0:10]:
         args.image = item
         args.outdir = "/output/"
         args.result = "output//" + top_files_names[file_counter][0:-4] + "top_results.txt"
@@ -536,7 +594,7 @@ if do_all == True:
         print("handled top picture %i of %i" %(file_counter, len(top_files)))
         
     file_counter = 0
-    for item in side_files:
+    for item in side_files[0:0]:
         args.image = item
         #background = "C:\\Users\\RensD\\OneDrive\\studie\\Master\\The_big_project\\side_perspective\\background.png"
         background = "background.png"
@@ -545,8 +603,9 @@ if do_all == True:
         args.result = "output//" + side_files_names[file_counter][0:-4] + "side_results.txt"
         args.filename = side_files_names[file_counter][0:-4]
         main_side()
-        print("handled side picture %i of %i" %(file_counter, len(side_files)))
         file_counter += 1
+        print("handled side picture %i of %i" %(file_counter, len(side_files)))
+        
         
     # Now the 3D workflow
     files = []          # absolute paths uses for processing
@@ -556,9 +615,8 @@ if do_all == True:
         files_names.append(os.path.basename(item))
         files.append(os.path.join(wd, item))
 
-        
     file_counter = 0
-    for item in files:
+    for item in files[0:10]:
         args.image = item
         args.outdir = "/output/"
         args.result = "output//" + files_names[file_counter][0:-4] + "_top_results.txt"
