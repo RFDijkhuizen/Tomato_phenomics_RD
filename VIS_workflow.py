@@ -162,11 +162,11 @@ def main():
         new_im.save("output//" + args.filename + "boundary_img.png")
         
         # Determine color properties: Histograms, Color Slices, output color analyzed histogram (optional)
-        color_img = pcv.analyze_color(rgb_img=img, mask=kept_mask, hist_plot_type = None)
+        #color_img = pcv.analyze_color(rgb_img=img, mask=kept_mask, hist_plot_type = None)
         #new_im = Image.fromarray(color_img)
         #new_im.save(args.filename + "color_img.png")
         
-        #color_histogram = pcv.analyze_color(rgb_img=img, mask=kept_mask, hist_plot_type='all')
+        color_histogram = pcv.analyze_color(rgb_img=img, mask=kept_mask, hist_plot_type='all')
         
         # Find shape properties, output shape image (optional)
         shape_img = pcv.analyze_object(img=img, obj=obj, mask=mask)
@@ -383,8 +383,12 @@ def workflow_3d():
     outfile=args.outdir+"/"+filename
         
     skeleton = pcv.morphology.skeletonize(mask)
+    skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=5) # Prune to remove barbs
     new_im = Image.fromarray(skeleton)
     new_im.save("output//" + args.filename + "_top_skeleton.png")
+    
+    pcv.params.line_thickness = 3 
+    leaf_obj, other_obj = pcv.morphology.segment_sort(skel_img=skeleton, objects=segment_objects, mask=mask)
     
     segmented_img, segmented_obj = pcv.morphology.segment_skeleton(skel_img=skeleton)
     new_im = Image.fromarray(segmented_img)
@@ -393,6 +397,17 @@ def workflow_3d():
     cycle_img = pcv.morphology.check_cycles(skel_img=skeleton)
     new_im = Image.fromarray(cycle_img)
     new_im.save("output//" + args.filename + "top_cycle_skeleton.png")
+
+    seg_angle_img = pcv.morphology.segment_angle(segmented_img = segmented_img, objects = leaf_obj)
+    new_im = Image.fromarray(seg_angle_img)
+    new_im.save("output//" + args.filename + "top_leaf_angle.png")
+    leaf_angles_values = pcv.outputs.observations['segment_angle']['value']
+    leaf_angles_labels = pcv.outputs.observations['segment_angle']['label']
+
+    pcv.outputs.add_observation(variable = "leaf_angles", trait = "leaf_angles",
+                                method = "plantcv.morphology.segment_angle",
+                                scale = "degrees", datatype = float,
+                                value = leaf_angles_values, label = leaf_angles_labels)
 
     seg_angle_img = pcv.morphology.segment_angle(segmented_img, segmented_obj)
     new_im = Image.fromarray(seg_angle_img)
@@ -461,6 +476,7 @@ def workflow_3d():
     outfile=args.outdir+"/"+filename
     
     skeleton = pcv.morphology.skeletonize(mask)
+    skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=5) # Prune to remove barbs
     new_im = Image.fromarray(skeleton)
     new_im.save("output//" + args.filename + "_side_skeleton.png")
 
@@ -568,7 +584,7 @@ if do_subset == True:
 do_all = True
 if do_all == True:      
     wd = os.getcwd()
-    args.debug = "Plot"
+    args.debug = "plot"
     top_files = []          # absolute paths uses for processing
     top_files_names = []    # The names used for storing 
     temp = glob.glob("input//*cam9.png")
@@ -584,7 +600,7 @@ if do_all == True:
 
         
     file_counter = 0
-    for item in top_files[0:10]:
+    for item in top_files[0:0]:
         args.image = item
         args.outdir = "/output/"
         args.result = "output//" + top_files_names[file_counter][0:-4] + "top_results.txt"
@@ -616,7 +632,7 @@ if do_all == True:
         files.append(os.path.join(wd, item))
 
     file_counter = 0
-    for item in files[0:10]:
+    for item in files[0:1]:
         args.image = item
         args.outdir = "/output/"
         args.result = "output//" + files_names[file_counter][0:-4] + "_top_results.txt"
