@@ -5,7 +5,7 @@ library(alphashape3d)
 
 ############################################################# TOP PERSPECTIVE RGB IMAGE
 ## Load data
-setwd("~/Big_project")
+setwd("~/rens2")
   
 ## get data
 file.list <- list.files("output/")
@@ -16,7 +16,7 @@ tmp <- fromJSON(file=paste0(c("output/",file.list[1]),collapse = ""))
 
 trait.list <- NULL
 for (i in 1:length(tmp$observations)){
-  trait.list <- c(trait.list,rep(tmp$observations[[i]]$trait,length(tmp$observations[[i]]$value)))
+  trait.list <- c(trait.list,rep(tmp$observations[[i]]$trait,1))
 }
 tmp$observations$genotype$value
 
@@ -26,7 +26,7 @@ for ( j in 1:length(file.list)){
 tmp <- fromJSON(file=paste0(c("output/",file.list[j]),collapse = ""))
 pheno.tmp <- NULL
 for (i in 1:length(tmp$observations)){
-  pheno.tmp <- c(pheno.tmp,tmp$observations[[i]]$value)
+  pheno.tmp <- c(pheno.tmp,mean(tmp$observations[[i]]$value))
 
 }
 pheno.collect[j,] <- pheno.tmp
@@ -35,20 +35,6 @@ colnames(pheno.collect) <- trait.list
 rownames(pheno.collect) <- file.list
 pheno.collect[1:5,1:5]
 pheno.collect <- data.frame(pheno.collect)
-
-### Remove unnesecarry rows
-# Get the index of elements we want to remove for now.
-index_counter <- 1
-index_list <- vector()
-for (element in trait.list){
-  if (str_sub(element,-11,-1) == "frequencies"){
-   index_list <- c(index_list, index_counter)
-  }
-  index_counter <- index_counter + 1
-}
-
-pheno.collect <- pheno.collect[,-(index_list)]
-
 
 ### RANDOM NICE PLOTS
 plot(pheno.collect$area.above.reference)
@@ -61,8 +47,6 @@ qplot(geom = 'boxplot',genotype, area, data = pheno.collect)
 
 
 ##################################################################################### TOP perspective 3D data
-## Load data
-setwd("~/Big_project")
 
 ## get data
 file.list <- list.files("output/")
@@ -73,18 +57,18 @@ tmp <- fromJSON(file=paste0(c("output/",file.list[1]),collapse = ""))
 
 trait.list <- NULL
 for (i in 1:length(tmp$observations)){
-  trait.list <- c(trait.list,rep(tmp$observations[[i]]$trait,length(tmp$observations[[i]]$value)))
-}
-tmp$observations$genotype$value
+  trait.list <- c(trait.list,rep(tmp$observations[[i]]$trait,1))
 
+}
 
 pheno.collect <- matrix(NA,nrow = length(file.list),ncol = length(trait.list))
 for ( j in 1:length(file.list)){
   tmp <- fromJSON(file=paste0(c("output/",file.list[j]),collapse = ""))
   pheno.tmp <- NULL
   for (i in 1:length(tmp$observations)){
-    pheno.tmp <- c(pheno.tmp,tmp$observations[[i]]$value)
-    
+    print(length(mean(tmp$observations[[i]]$value)))
+    pheno.tmp <- c(pheno.tmp,mean(tmp$observations[[i]]$value))
+
   }
   pheno.collect[j,] <- pheno.tmp
 }
@@ -92,20 +76,6 @@ colnames(pheno.collect) <- trait.list
 rownames(pheno.collect) <- file.list
 pheno.collect[1:5,1:5]
 pheno.collect <- data.frame(pheno.collect)
-
-### Remove unnesecarry rows
-# Get the index of elements we want to remove for now.
-index_counter <- 1
-index_list <- vector()
-for (element in trait.list){
-  if (str_sub(element,-11,-1) == "frequencies"){
-    index_list <- c(index_list, index_counter)
-  }
-  index_counter <- index_counter + 1
-}
-
-pheno.collect <- pheno.collect[,-(index_list)]
-
 
 ### RANDOM NICE PLOTS
 plot(pheno.collect$area.above.reference)
@@ -123,7 +93,7 @@ qplot(geom = 'boxplot',genotype, area, data = pheno.collect)
 
 ############################################################# SIDE PERSPECTIVE RGB IMAGE
 ## Load data
-setwd("~/Big_project")
+
 
 ## get data
 file.list <- list.files("output/")
@@ -135,7 +105,7 @@ tmp <- fromJSON(file=paste0(c("output/",file.list[1]),collapse = ""))
 
 trait.list <- NULL
 for (i in 1:length(tmp$observations)){
-  trait.list <- c(trait.list,rep(tmp$observations[[i]]$trait,length(tmp$observations[[i]]$value)))
+  trait.list <- c(trait.list,rep(tmp$observations[[i]]$trait,1))
 }
 tmp$observations$genotype$value
 
@@ -144,7 +114,7 @@ for ( j in 1:length(file.list)){
   tmp <- fromJSON(file=paste0(c("output/",file.list[j]),collapse = ""))
   pheno.tmp <- NULL
   for (i in 1:length(tmp$observations)){
-    pheno.tmp <- c(pheno.tmp,tmp$observations[[i]]$value)
+    pheno.tmp <- c(pheno.tmp,mean(tmp$observations[[i]]$value))
     
   }
   pheno.collect[j,] <- pheno.tmp
@@ -153,20 +123,6 @@ colnames(pheno.collect) <- trait.list
 rownames(pheno.collect) <- file.list
 pheno.collect[1:5,1:5]
 pheno.collect <- data.frame(pheno.collect)
-
-### Remove unnesecarry rows
-# Get the index of elements we want to remove for now.
-index_counter <- 1
-index_list <- vector()
-for (element in trait.list){
-  if (str_sub(element,-11,-1) == "frequencies"){
-    index_list <- c(index_list, index_counter)
-  }
-  index_counter <- index_counter + 1
-}
-
-pheno.collect <- pheno.collect[,-(index_list)]
-
 
 ### RANDOM NICE PLOTS
 plot(pheno.collect$area.above.reference)
@@ -179,9 +135,6 @@ boxplot(pheno.collect$height ~ pheno.collect$genotype)
 qplot(geom = 'boxplot',genotype, area, data = pheno.collect)
 
 ############################################################# SIDE PERSPECTIVE 3D data
-## Load data
-setwd("~/Big_project")
-
 ## get data
 file.list <- list.files("output/")
 file.list <- file.list[grep("3D_side_results.txt",file.list)]
@@ -191,7 +144,7 @@ tmp <- fromJSON(file=paste0(c("output/",file.list[1]),collapse = ""))
 
 trait.list <- NULL
 for (i in 1:length(tmp$observations)){
-  trait.list <- c(trait.list,rep(tmp$observations[[i]]$trait,length(tmp$observations[[i]]$value)))
+  trait.list <- c(trait.list,rep(tmp$observations[[i]]$trait,1))
 }
 tmp$observations$genotype$value
 
@@ -200,7 +153,7 @@ for ( j in 1:length(file.list)){
   tmp <- fromJSON(file=paste0(c("output/",file.list[j]),collapse = ""))
   pheno.tmp <- NULL
   for (i in 1:length(tmp$observations)){
-    pheno.tmp <- c(pheno.tmp,tmp$observations[[i]]$value)
+    pheno.tmp <- c(pheno.tmp,mean(tmp$observations[[i]]$value))
     
   }
   pheno.collect[j,] <- pheno.tmp
@@ -209,21 +162,6 @@ colnames(pheno.collect) <- trait.list
 rownames(pheno.collect) <- file.list
 pheno.collect[1:5,1:5]
 pheno.collect <- data.frame(pheno.collect)
-
-### Remove unnesecarry rows
-# Get the index of elements we want to remove for now.
-index_counter <- 1
-index_list <- vector()
-for (element in trait.list){
-  if (str_sub(element,-11,-1) == "frequencies"){
-    index_list <- c(index_list, index_counter)
-  }
-  index_counter <- index_counter + 1
-}
-
-pheno.collect <- pheno.collect[,-(index_list)]
-
-
 
 ### RANDOM NICE PLOTS
 plot(pheno.collect$area.above.reference)
@@ -238,7 +176,7 @@ qplot(geom = 'boxplot',genotype, area, data = pheno.collect)
 
 ############### Volume thingy
 #punten <- read.csv("C:/Users/RensD/Documents/studie/master/Offline_version/top_input/0004_2018-02-21 13.44 - 21_0_3D.csv")
-punten <- read.csv("~/Big_project/input/0003_2018-02-21 13.44 - 21_0_3D.csv", header=FALSE)
+punten <- read.csv("~/rens2/input/0003_2018-02-21 13.44 - 21_0_3D.csv", header=FALSE)
 
 
 View(punten)
