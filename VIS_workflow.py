@@ -5,6 +5,7 @@ import numpy as np
 import argparse
 import string
 from plantcv import plantcv as pcv
+import plantcv.utils
 import os
 import glob
 from PIL import Image, ImageDraw
@@ -39,11 +40,11 @@ b_higher_thresh_2 = 255             # 255 Threshold to capture plant
 b_fill_k = 1000                     # 1000 Fill to make sure we do not lose anything
 LAB_fill_k = 1500                   # 1500 Fill kernel for the LAB filtered image
 LAB_blur_k = 10                     # 10 Final Blur
-pattern = ".*- (\d+)\w+\d+.png"     # Pattern to get your genotype from filename
+pattern = ".*- (\d+.)\w+\d+.*"     # Pattern to get your genotype from filename
 replacement = "\g<1>"               # Replacement regex to get your genotype
 height = 200    # The boundary a plant should always fit in
 width = 200     # The boundary a plant should always fit in
-pattern_3d_file = ".*- (\d+)_\d_3D.csv"
+pattern_3d_file = ".*- (\d+.)_\d_3D.csv"
 
 class HiddenPrints:                                # To surpress unnecessary warning messages
     def __enter__(self):
@@ -177,7 +178,7 @@ def main():
         GT = re.sub(pattern, replacement, filename)
         pcv.outputs.add_observation(variable = "genotype", trait = "genotype",
                                     method = "Regexed from the filename", scale = None,
-                                    datatype = str, value = int(GT), label = "GT")
+                                    datatype = str, value = GT, label = "GT")
         
         # Write shape and color data to results file
         pcv.print_results(filename=args.result)
@@ -201,6 +202,7 @@ def main_side():
     path, img_name = os.path.split(args.image)
     img_bkgrd = cv2.imread("background.png", flags=0)
     # Substract the background
+
     bkg_sub_img = pcv.image_subtract(img_bkgrd, img)
     bkg_sub_thres_img, masked_img = pcv.threshold.custom_range(rgb_img=bkg_sub_img, lower_thresh=[50], 
                                                                upper_thresh=[255], channel='gray')
@@ -309,7 +311,7 @@ def main_side():
     GT = re.sub(pattern, replacement, filename)
     pcv.outputs.add_observation(variable = "genotype", trait = "genotype",
                                 method = "Regexed from the filename", scale = None,
-                                datatype = str, value = int(GT), label = "GT")
+                                datatype = str, value = GT, label = "GT")
 
     # Write shape and nir data to results file
     pcv.print_results(filename=args.result)
@@ -472,7 +474,7 @@ def workflow_3d():
     GT = re.sub(pattern_3d_file, replacement, files_names[file_counter])
     pcv.outputs.add_observation(variable = "genotype", trait = "genotype",
                                 method = "Regexed from the filename", scale = None,
-                                datatype = str, value = int(GT), label = "GT")
+                                datatype = str, value = GT, label = "GT")
     
     # Write shape and color data to results file
     pcv.print_results(filename=args.result)
@@ -579,7 +581,7 @@ def workflow_3d():
     GT = re.sub(pattern_3d_file, replacement, files_names[file_counter])
     pcv.outputs.add_observation(variable = "genotype", trait = "genotype",
                                 method = "Regexed from the filename", scale = None,
-                                datatype = str, value = int(GT), label = "GT")
+                                datatype = str, value = GT, label = "GT")
     #Write shape and color data to results file
     pcv.print_results(filename=args.result_side)
 
@@ -662,7 +664,7 @@ if do_all == True:
 
         
     file_counter = 0
-    for item in top_files[0:0]:
+    for item in top_files:
         pcv.outputs.clear() # To make sure you start clean
         args.image = item
         args.outdir = "/output/"
@@ -673,7 +675,7 @@ if do_all == True:
         print("handled top picture %i of %i" %(file_counter, len(top_files)))
         
     file_counter = 0
-    for item in side_files[0:0]:
+    for item in side_files:
         pcv.outputs.clear() # To make sure you start clean
         args.image = item
         #background = "C:\\Users\\RensD\\OneDrive\\studie\\Master\\The_big_project\\side_perspective\\background.png"
@@ -707,4 +709,10 @@ if do_all == True:
         file_counter += 1
         print("handled dataset %i of %i" %(file_counter, len(files)))
         
-            
+#json_files = glob.glob("*.JSON")
+#wd = os.getcwd()
+#for file in json_files:
+#    json_name = file
+#    print(json_name)
+#    new_name = json_name[0:-4]
+#    plantcv.utils.json2csv(json_file = json_name, csv_file = new_name)
