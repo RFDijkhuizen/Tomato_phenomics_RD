@@ -385,7 +385,11 @@ def workflow_3d():
     outfile=args.outdir+"/"+filename
         
     skeleton = pcv.morphology.skeletonize(mask)
-    skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=5) # Prune to remove barbs
+    try:
+        skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=5) # Prune to remove barbs
+    except: # passes plants too small to be pruned
+        skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=0) # Prune to remove barbs
+
     new_im = Image.fromarray(skeleton)
     new_im.save("output//" + args.filename + "_top_skeleton.png")
     
@@ -455,8 +459,11 @@ def workflow_3d():
 
     # Find shape properties, output shape image (optional)
     shape_img = pcv.analyze_object(img=img, obj=obj, mask=mask)
-    new_im = Image.fromarray(shape_img)
-    new_im.save("output//" + args.filename + "_top_shape.png")
+    try:
+        new_im = Image.fromarray(shape_img)
+        new_im.save("output//" + args.filename + "_top_shape.png")
+    except:
+        print("non fatal shape analyze error. Shape analysis could not be drawn") # weird error that happens 1 in ~1000 pictures.
     
     # Find all leaf tips
     try:
@@ -478,7 +485,9 @@ def workflow_3d():
     
     # Write shape and color data to results file
     pcv.print_results(filename=args.result)
+    
     #   #   #   #   #   #   #   #   #   #    # Now do approximately the same for the side pic
+    
     pcv.outputs.clear()
     args.image = ("output//" + args.filename + "side_3D.png")
     # Get options
@@ -510,7 +519,10 @@ def workflow_3d():
     outfile=args.outdir+"/"+filename
     
     skeleton = pcv.morphology.skeletonize(mask)
-    skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=5) # Prune to remove barbs
+    try:
+        skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=5) # Prune to remove barbs
+    except: # passes plants too small to be pruned
+        skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=0) # Prune to remove barbs
     new_im = Image.fromarray(skeleton)
     new_im.save("output//" + args.filename + "_side_skeleton.png")
     leaf_obj, other_obj = pcv.morphology.segment_sort(skel_img=skeleton, objects=segment_objects, mask=mask)
@@ -565,8 +577,11 @@ def workflow_3d():
 
     # Find shape properties, output shape image (optional)
     shape_img = pcv.analyze_object(img=img, obj=obj, mask=mask)
-    new_im = Image.fromarray(shape_img)
-    new_im.save("output//" + args.filename + "_side_shape.png")
+    try:
+        new_im = Image.fromarray(shape_img)
+        new_im.save("output//" + args.filename + "_side_shape.png")
+    except:
+        print("non fatal shape analyze error. Shape analysis could not be drawn") # weird error that happens 1 in ~1000 pictures.
     
     # Find all leaf tips
     try:
