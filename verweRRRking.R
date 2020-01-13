@@ -194,10 +194,10 @@ file.list <- file.list[grep("3D.csv", file.list)]
 pheno.volumes <- numeric()
 namesVOL <- c()
 for (j in 1:length(file.list)){
-  tmp <- read.csv(paste0(c("input/",file.list[j]),collapse = ""), header=FALSE)
-  if(length(tmp[,1])>1 & length(tmp[,2])>1 & length(tmp[,3])>1 & (length(tmp[,1]) + length(tmp[,2]) + length(tmp[,3])) > 1000){ 
+  tmp.data <- read.csv(paste0(c("input/",file.list[j]),collapse = ""), header=FALSE)
+  tmp <- cbind(tmp.data[,1], tmp.data[,2], tmp.data[,3])
+  if(length(levels(as.factor(tmp.data[,1])))>10 & length(levels(as.factor(tmp.data[,2])))>10 & length(levels(as.factor(tmp.data[,3])))>10 &length(tmp) > 1000  ){ 
     # Only really useful when the 3d model has a lot of points, so skip otherwise.
-  tmp <- cbind(tmp[,1], tmp[,2], tmp[,3])
     suppressWarnings(tmp <- ashape3d(tmp, alpha = 1, pert = TRUE)) # Surpresses the General position assumption warning
     components_ashape3d(tmp, 1)
     tmp <- volume_ashape3d(tmp, byComponents = FALSE, indexAlpha = 'all')
