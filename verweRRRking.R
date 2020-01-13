@@ -103,7 +103,7 @@ plot(ashape3d.obj, byComponents = TRUE)
 volume_ashape3d(ashape3d.obj, byComponents = FALSE, indexAlpha = 'all')
 
 
-################## Loop for cam data #################################################################
+################## Loop for top cam data #################################################################
 
 
 # Get all files in a list
@@ -244,6 +244,9 @@ this <- ggplot(pheno.collect2,aes(pheno.collect2$genotype,log2(as.numeric(pheno.
 this
 
 
+
+
+
 #### Final Frame ####################
 trait.listfinal <- c("sample_name", "top surface", "top convex hull", "top convex vertices", "top solidity", "top height", "top width","top perimeter",
                      "leafs seen from top", "top number of cycles", "top longest path", "top ellipse major axis length", "top ellipse minor axis length",
@@ -256,7 +259,7 @@ trait.listfinal <- c("sample_name", "top surface", "top convex hull", "top conve
 names.listfinal <- Reduce(intersect, list(names3D,names))                                           # List of samples that abide by both the 3D definition and the cam definition 
 pheno.collectfinal <- data.frame(matrix(NA,nrow = 0,ncol = length(trait.listfinal)), stringsAsFactors = FALSE)
 # In this loop all interesting traits will be inserted one by one.
-for (name in names.listfinal){
+for (name in names.listfinal[1:100]){ # The 1:1000 is a temporary subset for development
   # First everything simple we can learn from top perspective
   newrow <- data.frame(pheno.collect[name, "sample_name"])
   newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "area"]))
@@ -283,49 +286,117 @@ for (name in names.listfinal){
   newrow <- data.frame(newrow, mean(abs(as.numeric(unlist(str_split(pheno.collect[name, "top_stem_lengths"], ";"))))))
   newrow <- data.frame(newrow, sd(abs(as.numeric(unlist(str_split(pheno.collect[name, "top_stem_lengths"], ";"))))))
   # Now come the colors. For now we take the average amount of green or red in a leaf when you take the RGB values from all pixels considered plant.
-  colorvalues <- as.numeric(unlist(str_split(pheno.collect2[name, "green.frequencies"], ";")))
+  colortemp <- t(as.numeric(unlist(str_split(pheno.collect2[name, "green.frequencies"], ";"))))  # GREEN
+  colorcount <- 0
+  colorvalues <- numeric()
+  print(name)
+  for (i in colortemp){
+    tmp <- rep(colorcount, times = i)
+    colorvalues <- c(colorvalues, tmp)
+    colorcount <- colorcount + 1
+  }
   newrow <- data.frame(newrow, mean(colorvalues))
   newrow <- data.frame(newrow, sd(colorvalues))
-  colorvalues <- as.numeric(unlist(str_split(pheno.collect2[name, "red.frequencies"], ";")))
+  
+  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "red.frequencies"], ";")))    # RED
+  colorcount <- 0
+  colorvalues <- numeric()
+  print(name)
+  for (i in colortemp){
+    tmp <- rep(colorcount, times = i)
+    colorvalues <- c(colorvalues, tmp)
+    colorcount <- colorcount + 1
+  }
   newrow <- data.frame(newrow, mean(colorvalues))
   newrow <- data.frame(newrow, sd(colorvalues))
-  colorvalues <- as.numeric(unlist(str_split(pheno.collect2[name, "blue.frequencies"], ";")))
+  
+  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "blue.frequencies"], ";")))   # BLUE
+  colorcount <- 0
+  colorvalues <- numeric()
+  print(name)
+  for (i in colortemp){
+    tmp <- rep(colorcount, times = i)
+    colorvalues <- c(colorvalues, tmp)
+    colorcount <- colorcount + 1
+  }
   newrow <- data.frame(newrow, mean(colorvalues))
   newrow <- data.frame(newrow, sd(colorvalues))
-  # That was the RGB color space, now let's take a look at the HSV color space
-  colorvalues <- as.numeric(unlist(str_split(pheno.collect2[name, "hue.frequencies"], ";")))
+  
+  ## That was the RGB color space, now let's take a look at the HSV color space
+  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "hue.frequencies"], ";")))  # HUE
+  colorcount <- 0
+  colorvalues <- numeric()
+  print(name)
+  for (i in colortemp){
+    tmp <- rep(colorcount, times = i)
+    colorvalues <- c(colorvalues, tmp)
+    colorcount <- colorcount + 1
+  }
   newrow <- data.frame(newrow, mean(colorvalues))
   newrow <- data.frame(newrow, sd(colorvalues))
-  colorvalues <- as.numeric(unlist(str_split(pheno.collect2[name, "saturation.frequencies"], ";")))
+  
+  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "saturation.frequencies"], ";")))  # SATURATION
+  colorcount <- 0
+  colorvalues <- numeric()
+  print(name)
+  for (i in colortemp){
+    tmp <- rep(colorcount, times = i)
+    colorvalues <- c(colorvalues, tmp)
+    colorcount <- colorcount + 1
+  }
   newrow <- data.frame(newrow, mean(colorvalues))
   newrow <- data.frame(newrow, sd(colorvalues))
-  colorvalues <- as.numeric(unlist(str_split(pheno.collect2[name, "value.frequencies"], ";")))
+  
+  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "value.frequencies"], ";")))   # VALUE
+  colorcount <- 0
+  colorvalues <- numeric()
+  print(name)
+  for (i in colortemp){
+    tmp <- rep(colorcount, times = i)
+    colorvalues <- c(colorvalues, tmp)
+    colorcount <- colorcount + 1
+  }
   newrow <- data.frame(newrow, mean(colorvalues))
   newrow <- data.frame(newrow, sd(colorvalues))
+  
   # Now pure for completionist sake we can also add the CIELAB color space as we measured it anyway
-  colorvalues <- as.numeric(unlist(str_split(pheno.collect2[name, "lightness.frequencies"], ";")))
+  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "lightness.frequencies"], ";")))   # LIGHTNESS
+  colorcount <- 0
+  colorvalues <- numeric()
+  print(name)
+  for (i in colortemp){
+    tmp <- rep(colorcount, times = i)
+    colorvalues <- c(colorvalues, tmp)
+    colorcount <- colorcount + 1
+  }
   newrow <- data.frame(newrow, mean(colorvalues))
   newrow <- data.frame(newrow, sd(colorvalues))
-  colorvalues <- as.numeric(unlist(str_split(pheno.collect2[name, "green.magenta.frequencies"], ";")))
+  
+  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "green.magenta.frequencies"], ";")))  # GREEN_MAGENTA
+  colorcount <- 0
+  colorvalues <- numeric()
+  print(name)
+  for (i in colortemp){
+    tmp <- rep(colorcount, times = i)
+    colorvalues <- c(colorvalues, tmp)
+    colorcount <- colorcount + 1
+  }
   newrow <- data.frame(newrow, mean(colorvalues))
   newrow <- data.frame(newrow, sd(colorvalues))
-  colorvalues <- as.numeric(unlist(str_split(pheno.collect2[name, "blue.yellow.frequencies"], ";")))
+  
+  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "blue.yellow.frequencies"], ";")))  # BLUE_YELLOW
+  colorcount <- 0
+  colorvalues <- numeric()
+  print(name)
+  for (i in colortemp){
+    tmp <- rep(colorcount, times = i)
+    colorvalues <- c(colorvalues, tmp)
+    colorcount <- colorcount + 1
+  }
   newrow <- data.frame(newrow, mean(colorvalues))
   newrow <- data.frame(newrow, sd(colorvalues))
-  # Now for the side perspective
+  ## Now for the side perspective
   
-  
-  
-#### some color data stuff, extract the counts [0-255] --> green 
-  #tmp <- sapply(pheno.collect2$green.frequencies,strsplit,";")
-  #names(tmp) <- pheno.collect2$sample_name
-  #green.counts <- matrix(as.numeric(unlist(tmp)),ncol = 256)
-  #tot.cnt <- apply(green.counts,1,sum)
-  #val.sum <- apply(t(apply(green.counts,1,"*",0:255)),1,sum)
-  #ave.green <- val.sum/tot.cnt
-  #pheno.collect2 <- data.frame(pheno.collect2,ave.green)
-  #print(c(pheno.collect2["0020_2018-02-21 13.44 - 206A_0", ]))
-  # And finally bind the new row to the final dataframe.
   pheno.collectfinal <- rbind(pheno.collectfinal, newrow, stringsAsFactors = FALSE)
 }
 colnames(pheno.collectfinal) <- trait.listfinal
@@ -337,22 +408,15 @@ pheno.collectfinal[1:5, 2:length(trait.listfinal)]
 
 
 #### KLAD
-#for (name in names.listfinal){
-#  newrow <- data.frame(pheno.collect[name, "sample_name"])
-#  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "area"]))
-#  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "convex.hull.area"]))
-#  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "convex.hull.vertices"]))
-#  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "solidity"]))
-#  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "height"]))
-#  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "width"]))
-#  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "perimeter"]))
-#  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "estimated.object.count"]))
-#  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "number.of.cycles"]))
-#  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "longest.path"]))
-#  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "ellipse.major.axis.length"]))
-#  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "ellipse.minor.axis.length"]))
-#  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "ellipse.major.axis.angle"]))
-#  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "ellipse.eccentricity"]))
-#}
+
+## some color data stuff, extract the counts [0-255] --> green 
+#tmp <- sapply(pheno.collect2$green.frequencies,strsplit,";")
+#names(tmp) <- pheno.collect2$sample_name
+#green.counts <- matrix(as.numeric(unlist(tmp)),ncol = 256)
+
+#tot.cnt <- apply(green.counts,1,sum)
+#val.sum <- apply(t(apply(green.counts,1,"*",0:255)),1,sum)
+#ave.green <- val.sum/tot.cnt
+
 
 
