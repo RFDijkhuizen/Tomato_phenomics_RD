@@ -195,14 +195,15 @@ pheno.volumes <- numeric()
 namesVOL <- c()
 for (j in 1:length(file.list)){
   tmp <- read.csv(paste0(c("input/",file.list[j]),collapse = ""), header=FALSE)
+  if(length(tmp[,1])>1 & length(tmp[,2])>1 & length(tmp[,3])>1 & (length(tmp[,1]) + length(tmp[,2]) + length(tmp[,3])) > 1000){ 
+    # Only really useful when the 3d model has a lot of points, so skip otherwise.
   tmp <- cbind(tmp[,1], tmp[,2], tmp[,3])
-  if(length(tmp) > 1000){ # Only really useful when the 3d model has at lest 1000 points.
-  suppressWarnings(tmp <- ashape3d(tmp, alpha = 1, pert = TRUE)) # Surpresses the General position assumption warning
-  components_ashape3d(tmp, 1)
-  tmp <- volume_ashape3d(tmp, byComponents = FALSE, indexAlpha = 'all')
-  pheno.volumes <- c(pheno.volumes, tmp)
-  sample_name <- str_replace(file.list[j],"(^.+ - .+)_3D.*$", "\\1") # Start by adding the sample name as trait. get the sample name from file name with 
-  namesVOL <- c(namesVOL, sample_name)
+    suppressWarnings(tmp <- ashape3d(tmp, alpha = 1, pert = TRUE)) # Surpresses the General position assumption warning
+    components_ashape3d(tmp, 1)
+    tmp <- volume_ashape3d(tmp, byComponents = FALSE, indexAlpha = 'all')
+    pheno.volumes <- c(pheno.volumes, tmp)
+    sample_name <- str_replace(file.list[j],"(^.+ - .+)_3D.*$", "\\1") # Get the sample name to crossreference with other dataframes
+    namesVOL <- c(namesVOL, sample_name)
   }
 }
 
