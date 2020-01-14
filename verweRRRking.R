@@ -189,27 +189,37 @@ this
 
 
 ################## 3D volume calculation ################################################################
-file.list <- list.files("input/")
-file.list <- file.list[grep("3D.csv", file.list)]
-pheno.volumes <- numeric()
-namesVOL <- c()
-for (j in 1:length(file.list)){
-  tmp.data <- read.csv(paste0(c("input/",file.list[j]),collapse = ""), header=FALSE)
-  tmp <- cbind(tmp.data[,1], tmp.data[,2], tmp.data[,3])
-  if(length(levels(as.factor(tmp.data[,1])))>10 & length(levels(as.factor(tmp.data[,2])))>10 & length(levels(as.factor(tmp.data[,3])))>10 &length(tmp) > 1000  ){ 
-    # Only really useful when the 3d model has a lot of points, so skip otherwise.
-    suppressWarnings(tmp <- ashape3d(tmp, alpha = 1, pert = TRUE)) # Surpresses the General position assumption warning
-    components_ashape3d(tmp, 1)
-    tmp <- volume_ashape3d(tmp, byComponents = FALSE, indexAlpha = 'all')
-    pheno.volumes <- c(pheno.volumes, tmp)
-    sample_name <- str_replace(file.list[j],"(^.+ - .+)_3D.*$", "\\1") # Get the sample name to crossreference with other dataframes
-    namesVOL <- c(namesVOL, sample_name)
-  }
-}
+  file.list <- list.files("input/")
+  file.list <- file.list[grep("3D.csv", file.list)]
+  pheno.volumes <- numeric()
+  namesVOL <- c()
+  for (j in 1:length(file.list)){
+    tmp.data <- read.csv(paste0(c("input/",file.list[j]),collapse = ""), header=FALSE)
+    tmp <- cbind(tmp.data[,1], tmp.data[,2], tmp.data[,3])
+    if(length(levels(as.factor(tmp.data[,1])))>30 & length(levels(as.factor(tmp.data[,2])))>30 & length(levels(as.factor(tmp.data[,3])))>30 & length(tmp) > 100  ){ 
+      # Only really useful when the 3d model has a lot of points, so skip otherwise.
+      #suppressWarnings(tmp <- ashape3d(tmp, alpha = 1, pert = TRUE)) # Surpresses the General position assumption warning
+      tryCatch({ # Try part
+        suppressWarnings(tmp <- ashape3d(tmp, alpha = 1, pert = TRUE))
+        components_ashape3d(tmp, 1)
+        tmp <- volume_ashape3d(tmp, byComponents = FALSE, indexAlpha = 'all')
+        pheno.volumes <- c(pheno.volumes, tmp)
+        sample_name <- str_replace(file.list[j],"(^.+ - .+)_3D.*$", "\\1") # Get the sample name to crossreference with other dataframes
+        namesVOL <- c(namesVOL, sample_name)
+        print(length(namesVOL))
+      },
+      error=function(cond){ # The ashape3d function has a 1 in ~800 reason to randomly crash, this is there to catch that.
+        print("random volume error")
+      }
+      
+      )
 
-pheno.volumes <- data.frame(pheno.volumes)
-colnames(pheno.volumes) <- "Volume"
-rownames(pheno.volumes) <- namesVOL
+    }
+  }
+  
+  pheno.volumes <- data.frame(pheno.volumes)
+  colnames(pheno.volumes) <- "Volume"
+  rownames(pheno.volumes) <- namesVOL
 
 ################## Loop for top cam data #################################################################
 
@@ -525,15 +535,8 @@ pheno.collectfinal[1:5, 2:length(trait.listfinal)]
 
 
 #### KLAD
+write.csv(pheno.collectfinal, file = "result_14_01.csv")
 
-## some color data stuff, extract the counts [0-255] --> green 
-#tmp <- sapply(pheno.collect2$green.frequencies,strsplit,";")
-#names(tmp) <- pheno.collect2$sample_name
-#green.counts <- matrix(as.numeric(unlist(tmp)),ncol = 256)
-
-#tot.cnt <- apply(green.counts,1,sum)
-#val.sum <- apply(t(apply(green.counts,1,"*",0:255)),1,sum)
-#ave.green <- val.sum/tot.cnt
 
 
 
