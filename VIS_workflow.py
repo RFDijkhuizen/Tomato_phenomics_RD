@@ -40,11 +40,12 @@ b_higher_thresh_2 = 255             # 255 Threshold to capture plant
 b_fill_k = 1000                     # 1000 Fill to make sure we do not lose anything
 LAB_fill_k = 1500                   # 1500 Fill kernel for the LAB filtered image
 LAB_blur_k = 10                     # 10 Final Blur
-pattern = ".*- (\d+.)\w+\d+.*"     # Pattern to get your genotype from filename
+pattern = ".*- (\d+.)\w+\d+.*"      # Pattern to get your genotype from filename
 replacement = "\g<1>"               # Replacement regex to get your genotype
-height = 200    # The boundary a plant should always fit in
-width = 200     # The boundary a plant should always fit in
+height = 200                        # The boundary a plant should always fit in
+width = 200                         # The boundary a plant should always fit in
 pattern_3d_file = ".*- (\d+.)_\d_3D.csv"
+device = 0                          # Debugging variable
 
 class HiddenPrints:                                # To surpress unnecessary warning messages
     def __enter__(self):
@@ -109,12 +110,18 @@ def main():
     masked = pcv.apply_mask(rgb_img=img, mask=bs, mask_color='white')
     #print("Masked image")
     #Now the background is filtered away. Next step is to capture the plant.
-    
     # Convert RGB to LAB and extract the Green-Magenta and Blue-Yellow channels
     #print("LAB color space")
     masked_l = pcv.rgb2gray_lab(rgb_img=masked, channel='l')
+    #print ("lightness without laplace filtering")
     masked_a = pcv.rgb2gray_lab(rgb_img=masked, channel='a')
+    #lp_a_img = pcv.laplace_filter(masked_a, 1, 1)
+    #masked_a = pcv.image_subtract(masked_a, lp_a_img)
+    #print ("lightness after laplace filtering")
     masked_b = pcv.rgb2gray_lab(rgb_img=masked, channel='b')
+    #lp_b_img = pcv.laplace_filter(masked_b, 1, 1)
+    #masked_b = pcv.image_subtract(masked_b, lp_b_img)
+    #print ("lightness after laplace filtering")
     # Threshold the green-magenta and blue images
     #print("LAB threshholds")
     maskedl_thresh, maskedl_image = pcv.threshold.custom_range(rgb_img=masked_l, lower_thresh=[120], upper_thresh=[247], channel='gray')
@@ -153,14 +160,105 @@ def main():
             ############### Analysis ################
         
         outfile=args.outdir+"/"+filename
-        # Pseudocolor the grayscale image
-        # Turn pseudocolored img off to prevent unnecessary output
-        #pseudocolored_img = pcv.visualize.pseudocolor(gray_img=s, mask=kept_mask, cmap='jet')
+
+        skeleton = pcv.morphology.skeletonize(mask)
+        try:
+            skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=5) # Prune to remove barbs
+        except: # passes plants too small to be pruned
+            skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=0) # Prune to remove barbs
+    
+        new_im = Image.fromarray(skeleton)
+        new_im.save("output//" + args.filename + "_top_skeleton.png")
+        
+        pcv.params.line_thickness = 3 # just for debugging
+        leaf_obj, other_obj = pcv.morphology.segment_sort(skel_img=skeleton, objects=segment_objects, mask=mask)
+        
+        segmented_img, segmented_obj = pcv.morphology.segment_skeleton(skel_img=skeleton)
+        new_im = Image.fromarray(segmented_img)
+        new_im.save("output//" + args.filename + "top_segmented_skeleton.png")
+        
+        cycle_img = pcv.morphology.check_cycles(skel_img=skeleton)
+        new_im = Image.fromarray(cycle_img)
+        new_im.save("output//" + args.filename + "top_cycle_skeleton.png")
         
         # Shape properties relative to user boundary line (optional)
         boundary_img1 = pcv.analyze_bound_horizontal(img=img, obj=obj, mask=mask, line_position=1680)
         new_im = Image.fromarray(boundary_img1)
         new_im.save("output//" + args.filename + "boundary_img.png")
+        
+        if leaf_obj:
+            with HiddenPrints():
+                pcv.morphology.segment_angle(segmented_img = segmented_img, objects = leaf_obj)
+                leaf_angles_values = pcv.outputs.observations['segment_angle']['value']
+                leaf_angles_labels = pcv.outputs.observations['segment_angle']['label']
+        
+                pcv.outputs.add_observation(variable = "top_leaf_angles", trait = "top_leaf_angles",
+                                            method = "plantcv.morphology.segment_angle",
+                                            scale = "degrees", datatype = float,
+                                            value = leaf_angles_values, label = leaf_angles_labels)
+        if other_obj:
+            with HiddenPrints():
+                pcv.morphology.segment_angle(segmented_img = segmented_img, objects = other_obj)
+                stem_angles_values = pcv.outputs.observations['segment_angle']['value']
+                stem_angles_labels = pcv.outputs.observations['segment_angle']['label']
+            
+                pcv.outputs.add_observation(variable = "top_stem_angles", trait = "top_stem_angles",
+                                            method = "plantcv.morphology.segment_angle",
+                                            scale = "degrees", datatype = float,
+                                            value = stem_angles_values, label = stem_angles_labels)
+        if segmented_obj:
+            with HiddenPrints():
+                pcv.morphology.segment_angle(segmented_img, segmented_obj)
+                #new_im = Image.fromarray(seg_angle_img)
+                #new_im.save("output//" + args.filename + "top_seg_angle.png")
+    
+        path_length_img = pcv.morphology.segment_path_length(segmented_img, leaf_obj)
+        leaf_length_values = pcv.outputs.observations['segment_path_length']['value']
+        leaf_length_labels = pcv.outputs.observations['segment_path_length']['value']
+    
+        pcv.outputs.add_observation(variable = "top_leaf_length", trait = "top_leaf_lengths",
+                                    method = "plantcv.morphology.segment_angle",
+                                    scale = "pixels", datatype = float,
+                                    value = leaf_length_values, label = leaf_length_labels)
+    
+        path_length_img = pcv.morphology.segment_path_length(segmented_img, other_obj)
+        stem_length_values = pcv.outputs.observations['segment_path_length']['value']
+        stem_length_labels = pcv.outputs.observations['segment_path_length']['value']
+    
+        pcv.outputs.add_observation(variable = "top_stem_length", trait = "top_stem_lengths",
+                                    method = "plantcv.morphology.segment_angle",
+                                    scale = "pixels", datatype = float,
+                                    value = stem_length_values, label = stem_length_labels)
+    
+        path_length_img = pcv.morphology.segment_path_length(segmented_img, segmented_obj)
+        new_im = Image.fromarray(path_length_img)
+        new_im.save("output//" + args.filename + "top_seg_length.png")
+        
+        # Shape properties relative to user boundary line (optional)
+        boundary_img1 = pcv.analyze_bound_horizontal(img=img, obj=obj, mask=mask, line_position=1680)
+        new_im = Image.fromarray(boundary_img1)
+        new_im.save("output//" + args.filename + "_top_boundary.png")
+        
+        # Find shape properties, output shape image (optional)
+        shape_img = pcv.analyze_object(img=img, obj=obj, mask=mask)
+        try:
+            new_im = Image.fromarray(shape_img)
+            new_im.save("output//" + args.filename + "_top_shape.png")
+        except:
+            print("non fatal shape analyze error. Shape analysis could not be drawn") # weird error that happens 1 in ~1000 pictures.
+        
+        # Find all leaf tips
+        try:
+            list_of_acute_points, point_img = pcv.acute_vertex(img, obj, 10, 80, 20)
+            new_im = Image.fromarray(point_img)
+            new_im.save("output//" + args.filename + "_top_point_img.png")
+        except:
+            print("no acute points found")
+        
+        # Watershed image to find all leafs
+        analysis_image = pcv.watershed_segmentation(img, mask, 8)
+        new_im = Image.fromarray(analysis_image)
+        new_im.save("output//" + args.filename + "_leaves.png")
         
         # Determine color properties: Histograms, Color Slices, output color analyzed histogram (optional)
         #color_img = pcv.analyze_color(rgb_img=img, mask=kept_mask, hist_plot_type = None)
@@ -169,12 +267,7 @@ def main():
         
         color_histogram = pcv.analyze_color(rgb_img=img, mask=kept_mask, hist_plot_type='all')
         
-        # Find shape properties, output shape image (optional)
-        shape_img = pcv.analyze_object(img=img, obj=obj, mask=mask)
-        
         # Find and annotate genotype
-        new_im = Image.fromarray(shape_img)
-        new_im.save("output//" + args.filename + "shape_img.png")
         GT = re.sub(pattern, replacement, filename)
         pcv.outputs.add_observation(variable = "genotype", trait = "genotype",
                                     method = "Regexed from the filename", scale = None,
@@ -268,14 +361,19 @@ def main_side():
     mask, masked = pcv.threshold.custom_range(rgb_img=edge_masked_img, lower_thresh=[25], upper_thresh=[175], channel='gray')
     masked = pcv.apply_mask(rgb_img=masked, mask = mask, mask_color = 'white')
             #print("end")
+            
+    # Fill small objects, if there is nothing left exit with message "libpng warning: bKGD: invalid"     
+    ab_fill = pcv.fill(bin_img=mask, size=500) # Remove everything less than 500 pixels
+    #print("final fill and blur")
+    # Apply mask (for VIS images, mask_color=white)
+    masked_img = pcv.apply_mask(rgb_img=masked, mask=ab_fill, mask_color='white')
     # Identify objects
-    id_objects,obj_hierarchy = pcv.find_objects(img=edge_masked_img, mask=mask)
+    id_objects,obj_hierarchy = pcv.find_objects(img=masked_img, mask=mask)
 
     # Define ROI
     roi1, roi_hierarchy= pcv.roi.rectangle(img=edge_masked_img, x=100, y=100, h=800, w=1000)
 
     # Decide which objects to keep
-
     with HiddenPrints():
         roi_objects, hierarchy5, kept_mask, obj_area = pcv.roi_objects(img=edge_masked_img, 
                                                                        roi_contour=roi1, 
@@ -285,7 +383,7 @@ def main_side():
                                                                        roi_type='largest')
     
     rgb_img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
-    o, m = pcv.object_composition(img=rgb_img, contours=roi_objects, hierarchy=hierarchy5)
+    obj, mask = pcv.object_composition(img=rgb_img, contours=roi_objects, hierarchy=hierarchy5)
     
 ### Analysis ###
 
@@ -293,20 +391,100 @@ def main_side():
     if args.writeimg==True:
         outfile=args.outdir+"/"+filename
 
-    # Perform signal analysis   
-    shape_img = pcv.analyze_object(img=img, obj=o, mask=m)
-    new_im = Image.fromarray(shape_img)
-    new_im.save("output//" + args.filename + "shape_img_side.png")
+
+    skeleton = pcv.morphology.skeletonize(mask)
+    try:
+        skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=5) # Prune to remove barbs
+    except: # passes plants too small to be pruned
+        skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=0) # Prune to remove barbs
+    new_im = Image.fromarray(skeleton)
+    new_im.save("output//" + args.filename + "_side_skeleton.png")
+    leaf_obj, other_obj = pcv.morphology.segment_sort(skel_img=skeleton, objects=segment_objects, mask=mask)
+
+    segmented_img, segmented_obj = pcv.morphology.segment_skeleton(skel_img=skeleton)
+    new_im = Image.fromarray(segmented_img)
+    new_im.save("output//" + args.filename + "side_segmented_skeleton.png")
+    
+    cycle_img = pcv.morphology.check_cycles(skel_img=skeleton)
+    new_im = Image.fromarray(cycle_img)
+    new_im.save("output//" + args.filename + "side_cycle_skeleton.png")
+    
+    if leaf_obj:   # If object list is not empty
+        with HiddenPrints():
+            pcv.morphology.segment_angle(segmented_img = segmented_img, objects = leaf_obj)
+            leaf_angles_values = pcv.outputs.observations['segment_angle']['value']
+            leaf_angles_labels = pcv.outputs.observations['segment_angle']['label']
+    
+            pcv.outputs.add_observation(variable = "side_leaf_angles", trait = "side_leaf_angles",
+                                        method = "plantcv.morphology.segment_angle",
+                                        scale = "degrees", datatype = float,
+                                        value = leaf_angles_values, label = leaf_angles_labels)
+
+    if other_obj:   # If object list is not empty
+        with HiddenPrints():
+            pcv.morphology.segment_angle(segmented_img = segmented_img, objects = other_obj)
+
+            stem_angles_values = pcv.outputs.observations['segment_angle']['value']
+            stem_angles_labels = pcv.outputs.observations['segment_angle']['label']
+    
+            pcv.outputs.add_observation(variable = "side_stem_angles", trait = "side_stem_angles",
+                                        method = "plantcv.morphology.segment_angle",
+                                        scale = "degrees", datatype = float,
+                                        value = stem_angles_values, label = stem_angles_labels)
+    if segmented_obj:
+        with HiddenPrints():
+            pcv.morphology.segment_angle(segmented_img, segmented_obj)
+            #new_im = Image.fromarray(seg_angle_img)
+            #new_im.save("output//" + args.filename + "side_seg_angle.png")
+    
+    path_length_img = pcv.morphology.segment_path_length(segmented_img, segmented_obj)
+    new_im = Image.fromarray(path_length_img)
+    new_im.save("output//" + args.filename + "side_seg_length.png")
+    
+    path_length_img = pcv.morphology.segment_path_length(segmented_img, leaf_obj)
+    leaf_length_values = pcv.outputs.observations['segment_path_length']['value']
+    leaf_length_labels = pcv.outputs.observations['segment_path_length']['value']
+
+    pcv.outputs.add_observation(variable = "side_leaf_length", trait = "side_leaf_lengths",
+                                method = "plantcv.morphology.segment_angle",
+                                scale = "pixels", datatype = float,
+                                value = leaf_length_values, label = leaf_length_labels)
+
+    path_length_img = pcv.morphology.segment_path_length(segmented_img, other_obj)
+    stem_length_values = pcv.outputs.observations['segment_path_length']['value']
+    stem_length_labels = pcv.outputs.observations['segment_path_length']['value']
+
+    pcv.outputs.add_observation(variable = "side_stem_length", trait = "side_stem_lengths",
+                                method = "plantcv.morphology.segment_angle",
+                                scale = "pixels", datatype = float,
+                                value = stem_length_values, label = stem_length_labels)
+    
+    # Shape properties relative to user boundary line (optional)
+    boundary_img1 = pcv.analyze_bound_horizontal(img=img, obj=obj, mask=mask, line_position=1680)
+    new_im = Image.fromarray(boundary_img1)
+    new_im.save("output//" + args.filename + "_side_boundary.png")
+
+    # Find shape properties, output shape image (optional)
+    shape_img = pcv.analyze_object(img=img, obj=obj, mask=mask)
+    try:
+        new_im = Image.fromarray(shape_img)
+        new_im.save("output//" + args.filename + "_side_shape.png")
+    except:
+        print("non fatal shape analyze error. Shape analysis could not be drawn") # weird error that happens 1 in ~1000 pictures.
+    
+    # Find all leaf tips
+    try:
+        list_of_acute_points, point_img = pcv.acute_vertex(img, obj, 20, 80, 40)
+        new_im = Image.fromarray(point_img)
+        new_im.save("output//" + args.filename + "_side_point_img.png")
+    except:
+        print("no acute points found")
+
     nir_hist = pcv.analyze_nir_intensity(gray_img=img, mask=kept_mask, 
                                          bins=256, histplot=True)
 
-    top, bottom, center_v = pcv.x_axis_pseudolandmarks(img, o, mask)
-    left, right, center_h  = pcv.y_axis_pseudolandmarks(img, o, mask)  # This makes everything crash and explode
-
-    # Pseudocolor the grayscale image to a colormap
-    # Turn pseudocolored img off to prevent unnecessary output
-    #pseudocolored_img = pcv.visualize.pseudocolor(gray_img=img, mask=kept_mask, cmap='viridis')
-
+    top, bottom, center_v = pcv.x_axis_pseudolandmarks(img, obj, mask)
+    left, right, center_h  = pcv.y_axis_pseudolandmarks(img, obj, mask)  # This makes everything crash and explode
 
     GT = re.sub(pattern, replacement, filename)
     pcv.outputs.add_observation(variable = "genotype", trait = "genotype",
@@ -383,7 +561,7 @@ def workflow_3d():
     
     obj, mask = pcv.object_composition(img=img, contours=roi_objects, hierarchy=hierarchy3)
     outfile=args.outdir+"/"+filename
-        
+        ##### Analysis part ####
     skeleton = pcv.morphology.skeletonize(mask)
     try:
         skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=5) # Prune to remove barbs
@@ -567,8 +745,23 @@ def workflow_3d():
     new_im = Image.fromarray(path_length_img)
     new_im.save("output//" + args.filename + "side_seg_length.png")
     
+    path_length_img = pcv.morphology.segment_path_length(segmented_img, leaf_obj)
+    leaf_length_values = pcv.outputs.observations['segment_path_length']['value']
+    leaf_length_labels = pcv.outputs.observations['segment_path_length']['value']
 
+    pcv.outputs.add_observation(variable = "side_leaf_length", trait = "side_leaf_lengths",
+                                method = "plantcv.morphology.segment_angle",
+                                scale = "pixels", datatype = float,
+                                value = leaf_length_values, label = leaf_length_labels)
 
+    path_length_img = pcv.morphology.segment_path_length(segmented_img, other_obj)
+    stem_length_values = pcv.outputs.observations['segment_path_length']['value']
+    stem_length_labels = pcv.outputs.observations['segment_path_length']['value']
+
+    pcv.outputs.add_observation(variable = "side_stem_length", trait = "side_stem_lengths",
+                                method = "plantcv.morphology.segment_angle",
+                                scale = "pixels", datatype = float,
+                                value = stem_length_values, label = stem_length_labels)
     
     # Shape properties relative to user boundary line (optional)
     boundary_img1 = pcv.analyze_bound_horizontal(img=img, obj=obj, mask=mask, line_position=1680)
@@ -604,57 +797,6 @@ def workflow_3d():
 
 
 
-### Test on subset ###############################################################################################################
-"To test on a subset set do_subset to True, and do_all to False"  
-##################################################################################################################################
-do_subset = False
-if do_subset == True:
-    wd = os.getcwd()
-    top_files = []          # absolute paths uses for processing
-    top_files_names = []    # The names used for storing 
-    temp = glob.glob("subset//*cam9.png")
-    for item in temp:
-        top_files_names.append(os.path.basename(item))
-        top_files.append(os.path.join(wd, item))
-    side_files = []          # absolute paths uses for processing
-    side_files_names = []    # The names used for storing 
-    temp = glob.glob("subset//*cam0.png")
-    for item in temp:
-        side_files_names.append(os.path.basename(item))
-        side_files.append(os.path.join(wd, item))
-        
-    file_counter = 0
-    for item in top_files:
-        args.image = item
-        args.debug = "plot"
-        #args.outdir = "C:\\Users\\RensD\\OneDrive\\studie\\Master\\The_big_project\\subset\\"
-        args.outdir = "/subset/"
-        args.result = "subset/" + top_files_names[file_counter][0:-4] + "top_results.txt"
-        args.filename = top_files_names[file_counter][0:-4]
-        main()
-        file_counter += 1
-        print("handled top picture %i of %i" %(file_counter, len(top_files)))
-
-    # Now the 3D workflow
-    files = []          # absolute paths uses for processing
-    files_names = []    # The names used for storing 
-    temp = glob.glob("subset//*3D.csv")
-    for item in temp:
-        files_names.append(os.path.basename(item))
-        files.append(os.path.join(wd, item))
- 
-    file_counter = 0
-    for item in files:
-        args.image = item
-        args.debug = "None"
-        #args.outdir = "C:\\Users\\RensD\\OneDrive\\studie\\Master\\The_big_project\\subset\\"
-        args.outdir = "/subset/"
-        args.result = "subset//" + files_names[file_counter][0:-4] + "silhouette_results.txt"
-        args.result_side = "output//" + files_names[file_counter][0:-4] + "_side_results.txt"
-        args.filename = files_names[file_counter][0:-4]
-        workflow_3d()
-        file_counter += 1
-        print("handled top picture %i of %i" %(file_counter, len(files)))
     
 ### Do on all data ###############################################################################################################
 "To perform the script on all data set do_all to True and do_subset to False"  
@@ -723,6 +865,7 @@ if do_all == True:
         workflow_3d()
         file_counter += 1
         print("handled dataset %i of %i" %(file_counter, len(files)))
+        
         
 #json_files = glob.glob("*.JSON")
 #wd = os.getcwd()
