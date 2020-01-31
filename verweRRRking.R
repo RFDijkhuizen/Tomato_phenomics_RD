@@ -175,18 +175,6 @@ this <- ggplot(pheno.collect.side3D,aes(pheno.collect.side3D$genotype,as.numeric
   geom_boxplot()
 this
 
-
-################### 3D Volume thingy ####################################################################
-# currently just for one plant as test.
-#
-#punten <- read.csv("~/rens2/input/0030_2018-03-14 14.21 - 238A_0_3D.csv", header=FALSE)
-#x <- cbind(punten[,1], punten[,2], punten[,3])
-#ashape3d.obj <- ashape3d(x, alpha = 1, pert = TRUE)
-#components_ashape3d(ashape3d.obj, 1)
-#plot(ashape3d.obj, byComponents = TRUE)
-#volume_ashape3d(ashape3d.obj, byComponents = FALSE, indexAlpha = 'all')
-
-
 ################## 3D volume calculation ################################################################
   file.list <- list.files("input/")
   file.list <- file.list[grep("3D.csv", file.list)]
@@ -365,7 +353,7 @@ file.list <- list.files("output/")
 file.list <- file.list[grep("cam0side_results",file.list)]
 
 # Open one file to get dimensions
-tmp <- fromJSON(file=paste0(c("output/",file.list[500]),collapse = ""))
+tmp <- fromJSON(file=paste0(c("output/",file.list[1000]),collapse = ""))  # The first file opened here may not fail quality control. filling in 1000 is a crude solution
 trait.list <- NULL
 for (i in 1:length(tmp$observations)){
   trait.list <- c(trait.list,rep(tmp$observations[[i]]$trait,1))
@@ -378,8 +366,7 @@ colnames(pheno.collect2side) <- trait.list
 namesCAMside <- c()
 for ( j in 1:length(file.list)){
   tmp <- fromJSON(file=paste0(c("output/",file.list[j]),collapse = ""))
-  print(length(tmp$observations))
-  if( length(tmp$observations)==38){ # check if there are enough observations, so only fully scored plants are in the dataset
+  if( length(tmp$observations)==39){ # check if there are enough observations, so only fully scored plants are in the dataset
     sample_name <- str_replace(file.list[j],"(^.+ - .+)_cam0.*$", "\\1") # Start by adding the sample name as trait. get the sample name from file name with 
     sample_name <- paste(sample_name, "_0", sep = "")
     pheno.tmp <- sample_name 
@@ -396,6 +383,11 @@ for ( j in 1:length(file.list)){
     colnames(pheno.tmp) <- trait.list
     pheno.collect2side <- rbind(pheno.collect2side, pheno.tmp, stringsAsFactors = FALSE) # Now the pheno.tmp has only one row ;-)
   }}
+
+
+
+
+
 
 pheno.collect2side <- data.frame(pheno.collect2side, stringsAsFactors = FALSE)
 rownames(pheno.collect2side) <- namesCAMside
@@ -414,7 +406,7 @@ trait.listfinal <- c("sample_name", "top surface", "top convex hull", "top conve
                      "average hue value", "sd hue values", "average saturation value", "sd saturation values", "average value value", "sd value values",
                      "average lightness value", "sd lightness values", "average green-magenta value", "sd green-magenta values",
                      "average blue-yellow value", "sd blue-yellow values", "volume" ,"genotype")                                                         # Final phenotype list
-names.listfinal <- Reduce(intersect, list(names3D,names3Dside,names,namesVOL))                                           # List of samples that abide by both the 3D definition and the cam definition 
+names.listfinal <- Reduce(intersect, list(names3D,names3Dside,names,namesVOL,namesCAMside))                                           # List of samples that abide by both the 3D definition and the cam definition 
   
 pheno.collectfinal <- data.frame(matrix(NA,nrow = 0,ncol = length(trait.listfinal)), stringsAsFactors = FALSE)
 pheno.collectfinalCAM <- data.frame(matrix(NA,nrow = 0,ncol = length(trait.listfinal)), stringsAsFactors = FALSE)
@@ -603,24 +595,24 @@ for (name in names.listfinal){ # The 1:1000 is a temporary subset for developmen
   newrow <- data.frame(newrow, mean(abs(as.numeric(unlist(str_split(pheno.collect2[name, "top_stem_lengths"], ";"))))))
   newrow <- data.frame(newrow, sd(abs(as.numeric(unlist(str_split(pheno.collect2[name, "top_stem_lengths"], ";"))))))
   # Now some simply traits we see from side perspective
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "area"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "convex.hull.area"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "convex.hull.vertices"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "solidity"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "height"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "width"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "perimeter"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "number.of.cycles"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "longest.path"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "ellipse.major.axis.length"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "ellipse.minor.axis.length"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "ellipse.major.axis.angle"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "ellipse.eccentricity"]))
+  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "area"]))
+  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "convex.hull.area"]))
+  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "convex.hull.vertices"]))
+  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "solidity"]))
+  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "height"]))
+  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "width"]))
+  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "perimeter"]))
+  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "number.of.cycles"]))
+  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "longest.path"]))
+  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "ellipse.major.axis.length"]))
+  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "ellipse.minor.axis.length"]))
+  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "ellipse.major.axis.angle"]))
+  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "ellipse.eccentricity"]))
   # Now everything complex we need to get trough further calculations from side perspective
-  newrow <- data.frame(newrow, mean(abs(as.numeric(unlist(str_split(pheno.collect.side3D[name, "side_leaf_angles"], ";"))))))
-  newrow <- data.frame(newrow, sd(abs(as.numeric(unlist(str_split(pheno.collect.side3D[name, "side_leaf_angles"], ";"))))))
-  newrow <- data.frame(newrow, mean(abs(as.numeric(unlist(str_split(pheno.collect.side3D[name, "side_stem_angles"], ";"))))))
-  newrow <- data.frame(newrow, sd(abs(as.numeric(unlist(str_split(pheno.collect.side3D[name, "side_stem_angles"], ";"))))))
+  newrow <- data.frame(newrow, mean(abs(as.numeric(unlist(str_split(pheno.collect2side[name, "side_leaf_angles"], ";"))))))
+  newrow <- data.frame(newrow, sd(abs(as.numeric(unlist(str_split(pheno.collect2side[name, "side_leaf_angles"], ";"))))))
+  newrow <- data.frame(newrow, mean(abs(as.numeric(unlist(str_split(pheno.collect2side[name, "side_stem_angles"], ";"))))))
+  newrow <- data.frame(newrow, sd(abs(as.numeric(unlist(str_split(pheno.collect2side[name, "side_stem_angles"], ";"))))))
   # Now come the colors. For now we take the average amount of green or red in a leaf when you take the RGB values from all pixels considered plant.
   colortemp <- t(as.numeric(unlist(str_split(pheno.collect2[name, "green.frequencies"], ";"))))  # GREEN
   colorcount <- 0
