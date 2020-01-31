@@ -1,131 +1,135 @@
-## Libraries
-library(openxlsx)
-library(RcppArmadillo)
-library(ggplot2)
-library(gplots)
-setwd("~/rens2")
-### genetic map
+  ## Libraries
+  library(openxlsx)
+  library(RcppArmadillo)
+  library(ggplot2)
+  library(gplots)
+  setwd("~/rens2")
+  ### genetic map
+  
+  ## from RNA-seq SNP data
+  
+  
+  ch1 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch01")
+  ch2 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch02")
+  ch3 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch03")
+  ch4 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch04")
+  ch5 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch05")
+  ch6 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch06")
+  ch7 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch07")
+  ch8 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch08")
+  ch9 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch09")
+  ch10 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch10")
+  ch11 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch11")
+  ch12 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch12")
+  
+  # For cam data do this line
+  #finalframe <- pheno.collectfinal[complete.cases(pheno.collectfinalCAM),]
+  # For 3D data do this line
+  finalframe <- pheno.collectfinal[complete.cases(pheno.collectfinal),]
+  
+  rna.map <- rbind(ch1,ch2,ch3,ch4,ch5,ch6,ch7,ch8,ch9,ch10,ch11,ch12)
+  rna.map
+  dim(rna.map)
+  colnames(rna.map) <- gsub(".*_RIL(.*)_.*","\\1A",colnames(rna.map))
+  rna.map
+  image(t(rna.map[,-1]))
+  
+  #### cleaning data by detecting weird plants
+  
+  plant.cor <- cor(t(finalframe[,c(-1,-ncol(finalframe))]),use = "pairwise")
+  ave.plant.cor <- apply(plant.cor,1,mean)
+  hist(ave.plant.cor,breaks = 100)
+  
+  mall <- apply(finalframe[,c(-1,-ncol(finalframe))],2,mean)
+  splnt <- finalframe[ave.plant.cor<0.5,c(-1,-ncol(finalframe))]
+  plot(as.numeric(splnt[1,]),as.numeric(mall))
+  
+  ### correlation between traits 
+  
+  trait.cor <- cor(finalframe[,c(-1,-ncol(finalframe))],use = "pairwise")
+  heatmap.2(trait.cor,trace = "none",col=rainbow(256))
+  
+  ### H2
+  #finalframe$top
+  trt <- sample(finalframe$`top surface`)
+  trt <- finalframe$`top surface`
+  geno <- finalframe$genotype
+  mean(table(geno))
+  
+  ok <- anova(lm(trt~geno))
+  S <- ok$`Mean Sq`[1]
+  W <- ok$`Mean Sq`[2]
+  r <- 150# average number of observations per genotype
+  (4*(S-W))/(S+((r-1)*W))
+  S/(W+S)
+  var(trt)
+  
+  ### data 
+  
+  finalframe$genotype
+  finalframe$`top surface`
+  mean.trait <- aggregate(finalframe$`top average stem angle` ,list(finalframe$genotype),quantile)
+  
+  ### get gentic data of the RILs for which we have a trait value and get trait an map in the same order
+  ril.inter <- intersect(colnames(rna.map),mean.trait$Group.1)
+  ril.inter <- ril.inter[!ril.inter %in% c("308A","243A")] # remove 308 and 243 as they do not have enough observations
+  use.map <- rna.map[,ril.inter]
+  use.trt <- mean.trait$x[,3]
+  names(use.trt) <- as.character(mean.trait$Group.1)
+  use.trt <- use.trt[ril.inter]
+  use.trt
+  
+  ###FAST MAP
+  
+  ## script (this make suse of the library(RcppArmadillo) specifically the fastLm() function)
+  
+  fast.map <- function(xm,gxpr){
+    # ok <- fastLm(cbind(1,xm),as.numeric(gxpr))
+    ok <- fastLm(gxpr~xm)
+    pval <- pt(abs(ok$coefficients)/ok$stderr,ok$df.residual,lower.tail = F) * 2
+    pval <- pval[2]
+    SSyy <- sum(abs(gxpr-mean(gxpr))^2)
+    SSE <- sum(abs(ok$residuals)^2) 
+    R2 <- (SSyy-SSE)/SSyy
+    n = length(ok$fitted.values)
+    k = length(ok$coefficients)-1
+    R2.adj <- 1-(SSE/SSyy)*(n-1)/(n-(k+1))
+    out <- c(pval) #,R2,R2.adj)
+  }
+  
+  ppm <- apply(t(use.map),2,fast.map,use.trt)
+  plot(-log10(ppm))
+  
+  
+    
+  chromo <- gsub("_.*","",rna.map[,1])
+  pos <- as.numeric(gsub(".*_","",rna.map[,1]))/1e6
+  lod <- -log10(as.numeric(ppm))
+  
+  to.pl <- data.frame(chromo,pos,lod)
+  this <- ggplot(to.pl,aes(pos,lod))+
+    geom_point(size=1)+
+    facet_grid(.~chromo,scale="free_x",space="free_x") +
+    scale_color_manual(values = c("blue","darkgreen","red","magenta","purple","green"))+
+    theme_light()+
+    theme(legend.position = "top")
+  
+  this 
+    
+  # Now to get the position of the significant traits
+  print("significant QTL on chromose")
+  to.pl$chromo[to.pl$lod > 3]
+  print("and position")
+  to.pl$pos[to.pl$lod >5]
 
-## from RNA-seq SNP data
-
-
-ch1 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch01")
-ch2 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch02")
-ch3 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch03")
-ch4 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch04")
-ch5 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch05")
-ch6 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch06")
-ch7 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch07")
-ch8 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch08")
-ch9 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch09")
-ch10 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch10")
-ch11 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch11")
-ch12 <- read.xlsx(xlsxFile = "Tomap_ITAG4.0_nov2019_withH.xlsx",sheet = "ch12")
-
-# For cam data do this line
-finalframe <- pheno.collectfinal[complete.cases(pheno.collectfinalCAM),]
-
-
-rna.map <- rbind(ch1,ch2,ch3,ch4,ch5,ch6,ch7,ch8,ch9,ch10,ch11,ch12)
-rna.map
-dim(rna.map)
-colnames(rna.map) <- gsub(".*_RIL(.*)_.*","\\1A",colnames(rna.map))
-rna.map
-image(t(rna.map[,-1]))
-
-#### cleaning data by detecting weird plants
-
-plant.cor <- cor(t(finalframe[,c(-1,-ncol(finalframe))]),use = "pairwise")
-ave.plant.cor <- apply(plant.cor,1,mean)
-hist(ave.plant.cor,breaks = 100)
-
-mall <- apply(finalframe[,c(-1,-ncol(finalframe))],2,mean)
-splnt <- finalframe[ave.plant.cor<0.5,c(-1,-ncol(finalframe))]
-plot(as.numeric(splnt[1,]),as.numeric(mall))
-
-### correlation between traits 
-
-trait.cor <- cor(finalframe[,c(-1,-ncol(finalframe))],use = "pairwise")
-heatmap.2(trait.cor,trace = "none",col=rainbow(256))
-
-### H2
-#finalframe$top
-trt <- sample(finalframe$`top surface`)
-trt <- finalframe$`top surface`
-geno <- finalframe$genotype
-mean(table(geno))
-
-ok <- anova(lm(trt~geno))
-S <- ok$`Mean Sq`[1]
-W <- ok$`Mean Sq`[2]
-r <- 150# average number of observations per genotype
-(4*(S-W))/(S+((r-1)*W))
-S/(W+S)
-var(trt)
-
-### data 
-
-finalframe$genotype
-finalframe$`top solidity`
-mean.trait <- aggregate(finalframe$`top solidity`,list(finalframe$genotype),quantile)
-
-### get gentic data of the RILs for which we have a trait value and get trait an map in the same order
-ril.inter <- intersect(colnames(rna.map),mean.trait$Group.1)
-ril.inter <- ril.inter[!ril.inter %in% c("308A","243A")] # remove 308 and 243 as they do not have enough observations
-use.map <- rna.map[,ril.inter]
-use.trt <- mean.trait$x[,3]
-names(use.trt) <- as.character(mean.trait$Group.1)
-use.trt <- use.trt[ril.inter]
-use.trt
-
-###FAST MAP
-
-## script (this make suse of the library(RcppArmadillo) specifically the fastLm() function)
-
-fast.map <- function(xm,gxpr){
-  # ok <- fastLm(cbind(1,xm),as.numeric(gxpr))
-  ok <- fastLm(gxpr~xm)
-  pval <- pt(abs(ok$coefficients)/ok$stderr,ok$df.residual,lower.tail = F) * 2
-  pval <- pval[2]
-  SSyy <- sum(abs(gxpr-mean(gxpr))^2)
-  SSE <- sum(abs(ok$residuals)^2) 
-  R2 <- (SSyy-SSE)/SSyy
-  n = length(ok$fitted.values)
-  k = length(ok$coefficients)-1
-  R2.adj <- 1-(SSE/SSyy)*(n-1)/(n-(k+1))
-  out <- c(pval) #,R2,R2.adj)
-}
-
-ppm <- apply(t(use.map),2,fast.map,use.trt)
-plot(-log10(ppm))
-
-
-
-chromo <- gsub("_.*","",rna.map[,1])
-pos <- as.numeric(gsub(".*_","",rna.map[,1]))/1e6
-lod <- -log10(as.numeric(ppm))
-
-to.pl <- data.frame(chromo,pos,lod)
-this <- ggplot(to.pl,aes(pos,lod))+
-  geom_point(size=1)+
-  facet_grid(.~chromo,scale="free_x",space="free_x") +
-  scale_color_manual(values = c("blue","darkgreen","red","magenta","purple","green"))+
-  theme_light()+
-  theme(legend.position = "top")
-
-this 
-
-which(-log10(ppm)>2)
-
-anova(lm(use.trt~as.numeric(use.map[3100,])+as.numeric(use.map[3923,])))
-
-boxplot(use.trt~as.numeric(use.map[3100,])>0.5)
-
-
-
-##### To expand the QTL mapping a multi-locus mapper might be useful.
-
-
-
-############# END #############################
-
+  which(-log10(ppm)>3)
+  boxplot(use.trt~as.numeric(use.map[3100,])>0.5)
+  
+  
+  
+  ##### To expand the QTL mapping a multi-locus mapper might be useful.
+  
+  
+  
+  ############# END #############################
+  
