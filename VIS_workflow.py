@@ -71,24 +71,27 @@ def main():
     # Threshold the saturation
     
 
-    #print("Starting HSV workflow")
+    print("Starting HSV workflow")
     s = pcv.rgb2gray_hsv(rgb_img=img, channel='s')
     s_thresh, maskeds_image = pcv.threshold.custom_range(rgb_img=s, lower_thresh=[saturation_lower_tresh], upper_thresh=[saturation_higher_tresh], channel='gray')
-    #print("thresholded on saturation")
+    print("thresholded on saturation")
     # Threshold the hue
     h = pcv.rgb2gray_hsv(rgb_img=img, channel='h')
     h_thresh, maskedh_image = pcv.threshold.custom_range(rgb_img=h, lower_thresh=[hue_lower_tresh], upper_thresh=[hue_higher_tresh], channel='gray')
-    #print("thresholded on hue")
+    print("thresholded on hue")
     v = pcv.rgb2gray_hsv(rgb_img=img, channel='v')
     v_thresh, maskedv_image = pcv.threshold.custom_range(rgb_img=v, lower_thresh=[value_lower_tresh], upper_thresh=[value_higher_tresh], channel='gray')
-    #print("thresholded on value")
+    print("thresholded on value")
     # Join saturation, Hue and Value
     sh = pcv.logical_and(bin_img1 = s_thresh, bin_img2 = h_thresh)
     hsv = pcv.logical_and(bin_img1 = sh, bin_img2=v_thresh)
     # Median Blur
     s_mblur = pcv.median_blur(gray_img=hsv, ksize= HSV_blur_k)
     #s_cnt = pcv.median_blur(gray_img=s_thresh, ksize=5)
-    #print("Blur on HSV")
+    print("Blur on HSV")
+    masked = pcv.apply_mask(rgb_img=img, mask=s_mblur, mask_color='white')
+    print("First filter step done")
+
     #______________________________________________________________#### END HSV COLORSPACE WORKFLOW ###
     
     #______________________________________________________________#### BEGIN CIELAB COLORSPACE WORKFLOW ###
@@ -96,22 +99,22 @@ def main():
     b = pcv.rgb2gray_lab(rgb_img=img, channel='b')
 
     # Threshold the blue image
-    b_thresh = pcv.threshold.binary(gray_img=b, threshold=b_lower_thresh_1, max_value=b_higher_thresh_1, object_type='light')
-    b_cnt = pcv.threshold.binary(gray_img=b, threshold=b_lower_thresh_1, max_value=b_higher_thresh_1, object_type='light')
-    #print("thresholded on blue yellow channel")
+    b_thresh = pcv.threshold.binary(gray_img=b, threshold=b_lower_thresh_1, max_value=b_higher_thresh_1, object_type='light') # now redundant
+    b_cnt = pcv.threshold.binary(gray_img=b, threshold=b_lower_thresh_1, max_value=b_higher_thresh_1, object_type='light')  
+    print("thresholded on blue yellow channel")
     # Fill small objects
     b_cnt = pcv.fill(b_thresh, b_fill_k)        # If the fill step fails because of small objects try a smaller fill, else abort.
-    #print("Filled blue channel mask")
+    print("Filled blue channel mask")
 
     # Join the thresholded saturation and blue-yellow images
     bs = pcv.logical_and(bin_img1=s_mblur, bin_img2=b_cnt)             # CHANGER OR TO AND
 
     # Apply Mask (for VIS images, mask_color=white)
     masked = pcv.apply_mask(rgb_img=img, mask=bs, mask_color='white')
-    #print("Masked image")
+    print("Masked image")
     #Now the background is filtered away. Next step is to capture the plant.
     # Convert RGB to LAB and extract the Green-Magenta and Blue-Yellow channels
-    #print("LAB color space")
+    print("LAB color space")
     masked_l = pcv.rgb2gray_lab(rgb_img=masked, channel='l')
     #print ("lightness without laplace filtering")
     masked_a = pcv.rgb2gray_lab(rgb_img=masked, channel='a')
@@ -123,14 +126,14 @@ def main():
     #masked_b = pcv.image_subtract(masked_b, lp_b_img)
     #print ("lightness after laplace filtering")
     # Threshold the green-magenta and blue images
-    #print("LAB threshholds")
+    print("LAB threshholds")
     maskedl_thresh, maskedl_image = pcv.threshold.custom_range(rgb_img=masked_l, lower_thresh=[120], upper_thresh=[247], channel='gray')
     maskeda_thresh, maskeda_image = pcv.threshold.custom_range(rgb_img=masked_a, lower_thresh=[0], upper_thresh=[114], channel='gray')
     maskedb_thresh, maskedb_image = pcv.threshold.custom_range(rgb_img=masked_b, lower_thresh=[130], upper_thresh=[240], channel='gray')
 
 
     # Join the thresholded saturation and blue-yellow images (OR)
-    #print("Join the thresholds")
+    print("Join the thresholds")
     ab1 = pcv.logical_and(bin_img1=maskeda_thresh, bin_img2=maskedb_thresh)
     ab = pcv.logical_and(bin_img1=maskedl_thresh, bin_img2=ab1)
 
@@ -138,7 +141,7 @@ def main():
         # Fill small objects
         ab_fill = pcv.median_blur(gray_img=ab, ksize= LAB_blur_k)
         ab_fill = pcv.fill(bin_img=ab_fill, size=LAB_fill_k)
-        #print("final fill and blur")
+        print("final fill and blur")
         # Apply mask (for VIS images, mask_color=white)
         masked2 = pcv.apply_mask(rgb_img=masked, mask=ab_fill, mask_color='white')
     
@@ -187,16 +190,19 @@ def main():
         new_im.save("output//" + args.filename + "boundary_img.png")
         
         if leaf_obj:
+            print("leaf angles")
             with HiddenPrints():
-                pcv.morphology.segment_angle(segmented_img = segmented_img, objects = leaf_obj)
-                leaf_angles_values = pcv.outputs.observations['segment_angle']['value']
-                leaf_angles_labels = pcv.outputs.observations['segment_angle']['label']
+                pcv.morphology.segment_insertion_angle(skel_img = skeleton, segmented_img = segmented_img, leaf_objects = leaf_obj,
+                                                       stem_objects = other_obj, size = 5)
+                leaf_angles_values = pcv.outputs.observations['segment_insertion_angle']['value']
+                leaf_angles_labels = pcv.outputs.observations['segment_insertion_angle']['label']
         
                 pcv.outputs.add_observation(variable = "top_leaf_angles", trait = "top_leaf_angles",
                                             method = "plantcv.morphology.segment_angle",
                                             scale = "degrees", datatype = float,
                                             value = leaf_angles_values, label = leaf_angles_labels)
         if other_obj:
+            print("stem angles")
             with HiddenPrints():
                 pcv.morphology.segment_angle(segmented_img = segmented_img, objects = other_obj)
                 stem_angles_values = pcv.outputs.observations['segment_angle']['value']
@@ -207,6 +213,7 @@ def main():
                                             scale = "degrees", datatype = float,
                                             value = stem_angles_values, label = stem_angles_labels)
         if segmented_obj:
+            print("segment_angles")
             with HiddenPrints():
                 pcv.morphology.segment_angle(segmented_img, segmented_obj)
                 #new_im = Image.fromarray(seg_angle_img)
@@ -255,16 +262,38 @@ def main():
         except:
             print("no acute points found")
         
+        print("landmarks")
+        top, bottom, center_v = pcv.x_axis_pseudolandmarks(img, obj, mask)
+        left, right, center_h  = pcv.y_axis_pseudolandmarks(img, obj, mask)
+        
         # Watershed image to find all leafs
         analysis_image = pcv.watershed_segmentation(img, mask, 8)
         new_im = Image.fromarray(analysis_image)
         new_im.save("output//" + args.filename + "_leaves.png")
         
+
+        
+        print("temp")
+        # Get all curvatures
+        
+        pcv.morphology.segment_curvature(segmented_img, leaf_obj)
+        leaf_curv_values = pcv.outputs.observations['segment_curvature']['value']
+        leaf_curv_labels = pcv.outputs.observations['segment_curvature']['label']
+        pcv.outputs.add_observation(variable = "top_leaf_curvature", trait = "top_leaf_curvature",
+                                    method = "plantcv.morphology.segment_curvature", scale = None,
+                                    datatype = "curve factor", value = leaf_curv_values, label = leaf_curv_labels)
+        
+        pcv.morphology.segment_curvature(segmented_img, other_obj)
+        stem_curv_values = pcv.outputs.observations['segment_curvature']['value']
+        stem_curv_labels = pcv.outputs.observations['segment_curvature']['label']
+        pcv.outputs.add_observation(variable = "top_stem_curvature", trait = "top_stem_curvature",
+                                    method = "plantcv.morphology.segment_curvature", scale = None,
+                                    datatype = "curve factor", value = stem_curv_values, label = stem_curv_labels)
+        
         # Determine color properties: Histograms, Color Slices, output color analyzed histogram (optional)
         #color_img = pcv.analyze_color(rgb_img=img, mask=kept_mask, hist_plot_type = None)
         #new_im = Image.fromarray(color_img)
         #new_im.save(args.filename + "color_img.png")
-        
         color_histogram = pcv.analyze_color(rgb_img=img, mask=kept_mask, hist_plot_type='all')
         
         # Find and annotate genotype
@@ -278,6 +307,7 @@ def main():
 
     except:
         print("not enough plant material found")
+        traceback.print_exc()
 
 ### Side workflow###################################################################################################################
 "MainSide() is the workflow for the grayscale sidepictures"     
@@ -345,8 +375,8 @@ def main_side():
     
     # Need to remove the edges of the image, we did that by generating a set of rectangles to mask the edges
 
-    masked1, box1_img, rect_contour1, hierarchy1 = pcv.rectangle_mask(img=img, p1=(500,875), 
-                                                                      p2=(720,960))
+    masked1, box1_img, rect_contour1, hierarchy1 = pcv.rectangle_mask(img=img, p1=(400,875), 
+                                                                      p2=(800,960))
     # mask the edges
     masked2, box2_img, rect_contour2, hierarchy2 = pcv.rectangle_mask(img=img, p1=(1,1), 
                                                                       p2=(1279,959))
@@ -411,14 +441,25 @@ def main_side():
     
     if leaf_obj:   # If object list is not empty
         with HiddenPrints():
-            pcv.morphology.segment_angle(segmented_img = segmented_img, objects = leaf_obj)
-            leaf_angles_values = pcv.outputs.observations['segment_angle']['value']
-            leaf_angles_labels = pcv.outputs.observations['segment_angle']['label']
+            pcv.morphology.segment_insertion_angle(skel_img = skeleton, segmented_img = segmented_img, leaf_objects = leaf_obj,
+                                                   stem_objects = other_obj, size = 5)
+            leaf_angles_values = pcv.outputs.observations['segment_insertion_angle']['value']
+            leaf_angles_labels = pcv.outputs.observations['segment_insertion_angle']['label']
     
             pcv.outputs.add_observation(variable = "side_leaf_angles", trait = "side_leaf_angles",
-                                        method = "plantcv.morphology.segment_angle",
-                                        scale = "degrees", datatype = float,
-                                        value = leaf_angles_values, label = leaf_angles_labels)
+                                method = "plantcv.morphology.segment_angle",
+                                scale = "degrees", datatype = float,
+                                value = leaf_angles_values, label = leaf_angles_labels)
+            
+            
+            #pcv.morphology.segment_angle(segmented_img = segmented_img, objects = leaf_obj)
+            #leaf_angles_values = pcv.outputs.observations['segment_angle']['value']
+            #leaf_angles_labels = pcv.outputs.observations['segment_angle']['label']
+    #
+     #       pcv.outputs.add_observation(variable = "side_leaf_angles", trait = "side_leaf_angles",
+      #                                  method = "plantcv.morphology.segment_angle",
+       #                                 scale = "degrees", datatype = float,
+        #                                value = leaf_angles_values, label = leaf_angles_labels)
 
     if other_obj:   # If object list is not empty
         with HiddenPrints():
@@ -484,7 +525,7 @@ def main_side():
                                          bins=256, histplot=True)
 
     top, bottom, center_v = pcv.x_axis_pseudolandmarks(img, obj, mask)
-    left, right, center_h  = pcv.y_axis_pseudolandmarks(img, obj, mask)  # This makes everything crash and explode
+    left, right, center_h  = pcv.y_axis_pseudolandmarks(img, obj, mask)
 
     GT = re.sub(pattern, replacement, filename)
     pcv.outputs.add_observation(variable = "genotype", trait = "genotype",
@@ -805,7 +846,7 @@ def workflow_3d():
 do_all = True
 if do_all == True:      
     wd = os.getcwd()
-    args.debug = "None"
+    args.debug = "plot"
     top_files = []          # absolute paths uses for processing
     top_files_names = []    # The names used for storing 
     temp = glob.glob("input//*cam9.png")
@@ -821,7 +862,7 @@ if do_all == True:
 
         
     file_counter = 0
-    for item in top_files:
+    for item in top_files[0:0]:
         pcv.outputs.clear() # To make sure you start clean
         args.image = item
         args.outdir = "/output/"
@@ -832,7 +873,7 @@ if do_all == True:
         print("handled top picture %i of %i" %(file_counter, len(top_files)))
         
     file_counter = 0
-    for item in side_files:
+    for item in side_files[24:25]:
         pcv.outputs.clear() # To make sure you start clean
         args.image = item
         #background = "C:\\Users\\RensD\\OneDrive\\studie\\Master\\The_big_project\\side_perspective\\background.png"
@@ -855,7 +896,7 @@ if do_all == True:
         files.append(os.path.join(wd, item))
 
     file_counter = 0
-    for item in files:
+    for item in files[0:0]:
         pcv.outputs.clear() # To make sure you start clean
         args.image = item
         args.outdir = "/output/"
