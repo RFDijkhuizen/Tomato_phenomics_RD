@@ -1,751 +1,975 @@
-library(rjson)
-library(stringr)
-library(ggplot2)
-library(alphashape3d)
-library(stringr)
-setwd("~/rens2")
+"This workflow uses CieLABcolors rather than RGB"
+import sys, traceback
+import cv2
+import numpy as np
+import argparse
+import string
+from plantcv import plantcv as pcv
+import plantcv.utils
+import os
+import glob
+from PIL import Image, ImageDraw
 
-#
-# 3D TOP results 
+import re
 
-# Get all files in a list
-file.list <- list.files("output/")
-file.list <- file.list[grep("3D_top_results.txt",file.list)]
+class args:
+    image = ""
+    outdir = "/output/"
+    debug = "None"
+    result = ""
+    filename = ""
 
-# Open one file to get dimensions
-tmp <- fromJSON(file=paste0(c("output/",file.list[1]),collapse = ""))
-trait.list <- NULL
-for (i in 1:length(tmp$observations)){
-  trait.list <- c(trait.list,rep(tmp$observations[[i]]$trait,1))
-}
-trait.list <- c("sample_name", trait.list)
+## Parameters
+"HSV color space"
+saturation_lower_tresh = 120        # 130
+saturation_higher_tresh = 240       # 240
+hue_lower_tresh = 18                # 18
+hue_higher_tresh = 55               # 55
+value_lower_tresh = 70              # 70
+value_higher_tresh = 255            # 250
+HSV_blur_k = 3                      # 3
+"CIELAB color space"
+l_lower_thresh = 130                # 130 Lower light thresh to be considered plant # original 125
+l_higher_thresh = 255               # 255 Higher thresh to be considered plant.
+a_lower_thresh_1 = 118              # 118 Lower thresh to be considered plant
+a_lower_thresh_2 = 138              # 138 Lower thresh to be considered too magenta to be plant
+b_lower_thresh_1 = 165              # 165 Threshold to filter background away
+b_higher_thresh_1 = 245             # 245 Threshold to filter background away
+b_lower_thresh_2 = 120              # 120 Threshold to capture plant
+b_higher_thresh_2 = 255             # 255 Threshold to capture plant
+b_fill_k = 1000                     # 1000 Fill to make sure we do not lose anything
+LAB_fill_k = 1500                   # 1500 Fill kernel for the LAB filtered image
+LAB_blur_k = 10                     # 10 Final Blur
+top_prune = 5                       # If a skeleton crop is smaller than this amount of pixels it is pruned away
+side_prune = 10                     # If a skeleton crop is smaller than this amount of pixels it is pruned away
+pattern = ".*- (\d+.)\w+\d+.*"      # Pattern to get your genotype from filename
+replacement = "\g<1>"               # Replacement regex to get your genotype
+height = 200                        # The boundary a plant should always fit in
+width = 200                         # The boundary a plant should always fit in
+pattern_3d_file = ".*- (\d+.)_\d_3D.csv"
+device = 0                          # Debugging variable
 
-# Create dataframe for observations
-pheno.collect <- data.frame(matrix(NA,nrow = 0,ncol = length(trait.list)), stringsAsFactors = FALSE)
-colnames(pheno.collect) <- trait.list
-names3D <- c()
-# Now loop over the data and insert values into the dataframe
-for ( j in 1:length(file.list)){
-  tmp <- fromJSON(file=paste0(c("output/",file.list[j]),collapse = ""))
-  if( length(tmp$observations)==33){ # check if there are enough observations, so only fully scored plants are in the dataset
-    sample_name <- str_replace(file.list[j],"(^.+ - .+)_3D.*$", "\\1") # Start by adding the sample name as trait. get the sample name from file name with 
-    pheno.tmp <- sample_name 
-    names3D <- c(names3D, sample_name)
-    for (i in 1:length(tmp$observations)){ # Loop over values and add them to vector
+class HiddenPrints:                                # To surpress unnecessary warning messages
+    def __enter__(self):
+        self._original_stdout = sys.stdout
+        sys.stdout = open(os.devnull, 'w')
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stdout.close()
+        sys.stdout = self._original_stdout
+
+### Main workflow##############################################################################################################
+"Main() is the workflow for the colored top pictures"     
+###############################################################################################################################
+def main():
+    pcv.params.debug = args.debug  # set debug mode
+    pcv.params.debug_outdir = args.outdir  # set output directory
+
+    # Read image
+    img, path, filename = pcv.readimage(filename=args.image)
+
+    #______________________________________________________________#### BEGIN HSV COLORSPACE WORKFLOW ###
+    # Convert RGB to HSV and extract the saturation channel
+    # Threshold the saturation
     
-    ## So there are traits with more than 1 value, to prevent errors we (useing paste) concatenate those values together separated by ; (so we can split later on)
-    ## posiible issue later on is that values will be stored as text/string/characters, we need to as.numeric() them when we want to plot/do stats...
+
+    #print("Starting HSV workflow")
+    s = pcv.rgb2gray_hsv(rgb_img=img, channel='s')
+    s_thresh, maskeds_image = pcv.threshold.custom_range(rgb_img=s, lower_thresh=[saturation_lower_tresh], upper_thresh=[saturation_higher_tresh], channel='gray')
+    #print("thresholded on saturation")
+    # Threshold the hue
+    h = pcv.rgb2gray_hsv(rgb_img=img, channel='h')
+    h_thresh, maskedh_image = pcv.threshold.custom_range(rgb_img=h, lower_thresh=[hue_lower_tresh], upper_thresh=[hue_higher_tresh], channel='gray')
+    #print("thresholded on hue")
+    v = pcv.rgb2gray_hsv(rgb_img=img, channel='v')
+    v_thresh, maskedv_image = pcv.threshold.custom_range(rgb_img=v, lower_thresh=[value_lower_tresh], upper_thresh=[value_higher_tresh], channel='gray')
+    #print("thresholded on value")
+    # Join saturation, Hue and Value
+    sh = pcv.logical_and(bin_img1 = s_thresh, bin_img2 = h_thresh)
+    hsv = pcv.logical_and(bin_img1 = sh, bin_img2=v_thresh)
+    # Median Blur
+    s_mblur = pcv.median_blur(gray_img=hsv, ksize= HSV_blur_k)
+    #s_cnt = pcv.median_blur(gray_img=s_thresh, ksize=5)
+    #print("Blur on HSV")
+    masked = pcv.apply_mask(rgb_img=img, mask=s_mblur, mask_color='white')
+    #print("First filter step done")
+
+    #______________________________________________________________#### END HSV COLORSPACE WORKFLOW ###
     
-    pheno.tmp <- cbind(pheno.tmp, paste(tmp$observations[[i]]$value,collapse = ";")) # 
-  }
-  # Add new observation here
-  #pheno.tmp <- data.frame(pheno.tmp, stringsAsFactors = FALSE)
-  colnames(pheno.tmp) <- trait.list
-  pheno.collect <- rbind(pheno.collect, pheno.tmp, stringsAsFactors = FALSE) # Now the pheno.tmp has only one row ;-)
-}}
-
-pheno.collect <- data.frame(pheno.collect, stringsAsFactors = FALSE)
-rownames(pheno.collect) <- names3D
-dim(pheno.collect)
-
-## simple plots
-this <- ggplot(pheno.collect,aes(as.numeric(pheno.collect$solidity)))+
-        geom_histogram(bins = 100)
-this
-
-this <- ggplot(pheno.collect,aes(as.numeric(pheno.collect$area)))+
-  geom_histogram(bins = 100)
-this
-
-#this <- ggplot(pheno.collect,aes(as.numeric(pheno.collect$area),as.numeric(pheno.collect$perimeter)))+
-#  geom_point()+
-#  geom_smooth()
-#this
-
-this <- ggplot(pheno.collect,aes(as.numeric(pheno.collect$longest.path)))+
-  geom_histogram(bins = 100)
-this
-
-med.trait <- aggregate(as.numeric(pheno.collect$area),list(pheno.collect$genotype),median)
-ril.ord <- med.trait$Group.1[order(med.trait$x)]
-pheno.collect$genotype <- factor(pheno.collect$genotype,levels = ril.ord)
-
-this <- ggplot(pheno.collect,aes(pheno.collect$genotype,as.numeric(pheno.collect$area)))+
-  geom_boxplot()
-this
-
-med.trait <- aggregate(as.numeric(pheno.collect$perimeter),list(pheno.collect$genotype),median)
-ril.ord <- med.trait$Group.1[order(med.trait$x)]
-pheno.collect$genotype <- factor(pheno.collect$genotype,levels = ril.ord)
-
-this <- ggplot(pheno.collect,aes(pheno.collect$genotype,as.numeric(pheno.collect$perimeter)))+
-  geom_boxplot()
-this
-
-med.trait <- aggregate(as.numeric(pheno.collect$solidity),list(pheno.collect$genotype),median)
-ril.ord <- med.trait$Group.1[order(med.trait$x)]
-pheno.collect$genotype <- factor(pheno.collect$genotype,levels = ril.ord)
-
-this <- ggplot(pheno.collect,aes(pheno.collect$genotype,as.numeric(pheno.collect$solidity)))+
-  geom_boxplot()
-this
-
-
-################## Loop for side 3D data #################################################################
-
-# Get all files in a list
-file.list <- list.files("output/")
-file.list <- file.list[grep("3D_side_results.txt",file.list)]
-
-# Open one file to get dimensions
-tmp <- fromJSON(file=paste0(c("output/",file.list[1]),collapse = ""))
-trait.list <- NULL
-for (i in 1:length(tmp$observations)){
-  trait.list <- c(trait.list,rep(tmp$observations[[i]]$trait,1))
-}
-trait.list <- c("sample_name", trait.list)
-
-# Create dataframe for observations
-pheno.collect.side3D <- data.frame(matrix(NA,nrow = 0,ncol = length(trait.list)), stringsAsFactors = FALSE)
-colnames(pheno.collect.side3D) <- trait.list
-names3Dside <- c()
-# Now loop over the data and insert values into the dataframe
-for ( j in 1:length(file.list)){
-  tmp <- fromJSON(file=paste0(c("output/",file.list[j]),collapse = ""))
-  if( length(tmp$observations)==32){ # check if there are enough observations, so only fully scored plants are in the dataset, should change to 32
-    sample_name <- str_replace(file.list[j],"(^.+ - .+)_3D.*$", "\\1") # Start by adding the sample name as trait. get the sample name from file name with 
-    pheno.tmp <- sample_name 
-    names3Dside <- c(names3Dside, sample_name)
-    for (i in 1:length(tmp$observations)){ # Loop over values and add them to vector
-      
-      ## So there are traits with more than 1 value, to prevent errors we (useing paste) concatenate those values together separated by ; (so we can split later on)
-      ## posiible issue later on is that values will be stored as text/string/characters, we need to as.numeric() them when we want to plot/do stats...
-      
-      pheno.tmp <- cbind(pheno.tmp, paste(tmp$observations[[i]]$value,collapse = ";")) # 
-    }
-    # Add new observation here
-    #pheno.tmp <- data.frame(pheno.tmp, stringsAsFactors = FALSE)
-    colnames(pheno.tmp) <- trait.list
-    pheno.collect.side3D <- rbind(pheno.collect.side3D, pheno.tmp, stringsAsFactors = FALSE) # Now the pheno.tmp has only one row ;-)
-  }}
-
-pheno.collect.side3D <- data.frame(pheno.collect.side3D, stringsAsFactors = FALSE)
-rownames(pheno.collect.side3D) <- names3Dside
-dim(pheno.collect.side3D)
-
-## simple plots
-this <- ggplot(pheno.collect.side3D,aes(as.numeric(pheno.collect.side3D$solidity)))+
-  geom_histogram(bins = 100)
-this
-
-this <- ggplot(pheno.collect.side3D,aes(as.numeric(pheno.collect.side3D$area)))+
-  geom_histogram(bins = 100)
-this
-
-#this <- ggplot(pheno.collect.side3D,aes(as.numeric(pheno.collect$area),as.numeric(pheno.collect$perimeter)))+
-#  geom_point()+
-#  geom_smooth()
-#this
-
-this <- ggplot(pheno.collect.side3D,aes(as.numeric(pheno.collect.side3D$longest.path)))+
-  geom_histogram(bins = 100)
-this
-
-med.trait <- aggregate(as.numeric(pheno.collect.side3D$area),list(pheno.collect.side3D$genotype),median)
-ril.ord <- med.trait$Group.1[order(med.trait$x)]
-pheno.collect.side3D$genotype <- factor(pheno.collect.side3D$genotype,levels = ril.ord)
-
-this <- ggplot(pheno.collect.side3D,aes(pheno.collect.side3D$genotype,as.numeric(pheno.collect.side3D$area)))+
-  geom_boxplot()
-this
-
-med.trait <- aggregate(as.numeric(pheno.collect.side3D$perimeter),list(pheno.collect.side3D$genotype),median)
-ril.ord <- med.trait$Group.1[order(med.trait$x)]
-pheno.collect.side3D$genotype <- factor(pheno.collect.side3D$genotype,levels = ril.ord)
-
-this <- ggplot(pheno.collect.side3D,aes(pheno.collect.side3D$genotype,as.numeric(pheno.collect.side3D$perimeter)))+
-  geom_boxplot()
-this
-
-med.trait <- aggregate(as.numeric(pheno.collect.side3D$solidity),list(pheno.collect.side3D$genotype),median)
-ril.ord <- med.trait$Group.1[order(med.trait$x)]
-pheno.collect.side3D$genotype <- factor(pheno.collect.side3D$genotype,levels = ril.ord)
-
-this <- ggplot(pheno.collect.side3D,aes(pheno.collect.side3D$genotype,as.numeric(pheno.collect.side3D$solidity)))+
-  geom_boxplot()
-this
-
-################## 3D volume calculation ################################################################
-  file.list <- list.files("input/")
-  file.list <- file.list[grep("3D.csv", file.list)]
-  pheno.volumes <- numeric()
-  namesVOL <- c()
-  for (j in 1:length(file.list)){
-    tmp.data <- read.csv(paste0(c("input/",file.list[j]),collapse = ""), header=FALSE)
-    tmp <- cbind(tmp.data[,1], tmp.data[,2], tmp.data[,3])
-    if(length(levels(as.factor(tmp.data[,1])))>30 & length(levels(as.factor(tmp.data[,2])))>30 & length(levels(as.factor(tmp.data[,3])))>30 & length(tmp) > 100  ){ 
-      # Only really useful when the 3d model has a lot of points, so skip otherwise.
-      tryCatch({ # Try part
-        suppressWarnings(tmp <- ashape3d(tmp, alpha = 1, pert = TRUE))
-        components_ashape3d(tmp, 1)
-        tmp <- volume_ashape3d(tmp, byComponents = FALSE, indexAlpha = 'all')
-        pheno.volumes <- c(pheno.volumes, tmp)
-        sample_name <- str_replace(file.list[j],"(^.+ - .+)_3D.*$", "\\1") # Get the sample name to crossreference with other dataframes
-        namesVOL <- c(namesVOL, sample_name)
-        print(length(namesVOL))
-      },
-      error=function(cond){ # The ashape3d function has a 1 in ~1000 reason to randomly crash, this is there to catch that.
-        print("random volume error")
-      }
-      
-      )
-
-    }
-  }
-  
-  pheno.volumes <- data.frame(pheno.volumes)
-  colnames(pheno.volumes) <- "Volume"
-  rownames(pheno.volumes) <- namesVOL
-  dim(pheno.volumes)
-
-################## Loop for top cam data #################################################################
-
-# Get all files in a list
-file.list <- list.files("output/")
-file.list <- file.list[grep("cam9top_results",file.list)]
-
-# Open one file to get dimensions
-tmp <- fromJSON(file=paste0(c("output/",file.list[1]),collapse = ""))
-trait.list <- NULL
-for (i in 1:length(tmp$observations)){
-  trait.list <- c(trait.list,rep(tmp$observations[[i]]$trait,1))
-}
-trait.list <- c("sample_name", trait.list)
-
-# Create dataframe for observations
-pheno.collect2 <- data.frame(matrix(NA,nrow = 0,ncol = length(trait.list)), stringsAsFactors = FALSE)
-colnames(pheno.collect2) <- trait.list
-names <- c()
-# Now loop over the data and insert values into the dataframe
-for ( j in 1:length(file.list)){
-  tmp <- fromJSON(file=paste0(c("output/",file.list[j]),collapse = ""))
-  if( length(tmp$observations)==45){ # check if there are enough observations, so only fully scored plants are in the dataset
-    sample_name <- str_replace(file.list[j],"(^.+ - .+)_cam9.*$", "\\1") # Start by adding the sample name as trait. get the sample name from file name with 
-    sample_name <- paste(sample_name, "_0", sep = "")
-    pheno.tmp <- sample_name 
-    names <- c(names, sample_name)
-    for (i in 1:length(tmp$observations)){ # Loop over values and add them to vector
-      
-      ## So there are traits with more than 1 value, to prevent errors we (useing paste) concatenate those values together separated by ; (so we can split later on)
-      ## posiible issue later on is that values will be stored as text/string/characters, we need to as.numeric() them when we want to plot/do stats...
-      
-      pheno.tmp <- cbind(pheno.tmp, paste(tmp$observations[[i]]$value,collapse = ";")) # 
-      #pheno.tmp <- cbind(pheno.tmp, tmp$observations[[i]]$value)
-    }
-    # Add new observation here
-    colnames(pheno.tmp) <- trait.list
-    pheno.collect2 <- rbind(pheno.collect2, pheno.tmp, stringsAsFactors = FALSE) # Now the pheno.tmp has only one row ;-)
-  }}
-
-pheno.collect2 <- data.frame(pheno.collect2, stringsAsFactors = FALSE)
-rownames(pheno.collect2) <- names
-dim(pheno.collect2)
-
-## simple plots
-this <- ggplot(pheno.collect2,aes(as.numeric(pheno.collect2$solidity)))+
-  geom_histogram(bins = 100)
-this
-
-this <- ggplot(pheno.collect2,aes(as.numeric(pheno.collect2$area)))+
-  geom_histogram(bins = 100)
-this
-
-med.trait <- aggregate(as.numeric(pheno.collect2$area),list(pheno.collect2$genotype),median)
-ril.ord <- med.trait$Group.1[order(med.trait$x)]
-pheno.collect2$genotype <- factor(pheno.collect2$genotype,levels = ril.ord)
-
-this <- ggplot(pheno.collect2,aes(pheno.collect2$genotype,as.numeric(pheno.collect2$area)))+
-  geom_boxplot()
-this
-
-## some color data stuff, extract the counts [0-255] --> green 
-tmp <- sapply(pheno.collect2$green.frequencies,strsplit,";")
-names(tmp) <- pheno.collect2$sample_name
-green.counts <- matrix(as.numeric(unlist(tmp)),ncol = 256)
-
-tot.cnt <- apply(green.counts,1,sum)
-val.sum <- apply(t(apply(green.counts,1,"*",0:255)),1,sum)
-ave.green <- val.sum/tot.cnt
-
-pheno.collect2 <- data.frame(pheno.collect2,ave.green)
-
-
-this <- ggplot(pheno.collect2,aes(as.numeric(pheno.collect2$ave.green)))+
-  geom_histogram(bins = 100)
-this
-
-
-#this <- ggplot(pheno.collect2,aes(as.numeric(pheno.collect2$area),as.numeric(pheno.collect2$ave.green)))+
-#  geom_point()+
-#  geom_smooth()
-#this
-
-med.trait <- aggregate(as.numeric(pheno.collect2$ave.green),list(pheno.collect2$genotype),median)
-ril.ord <- med.trait$Group.1[order(med.trait$x)]
-pheno.collect2$genotype <- factor(pheno.collect2$genotype,levels = ril.ord)
-
-this <- ggplot(pheno.collect2,aes(pheno.collect2$genotype,as.numeric(pheno.collect2$ave.green)))+
-  geom_boxplot()
-this
-
-
-##---> red
-
-tmp <- sapply(pheno.collect2$red.frequencies,strsplit,";")
-names(tmp) <- pheno.collect2$sample_name
-red.counts <- matrix(as.numeric(unlist(tmp)),ncol = 256)
-
-tot.cnt <- apply(red.counts,1,sum)
-val.sum <- apply(t(apply(red.counts,1,"*",0:255)),1,sum)
-ave.red <- val.sum/tot.cnt
-
-pheno.collect2 <- data.frame(pheno.collect2,ave.red)
-
-
-this <- ggplot(pheno.collect2,aes(as.numeric(pheno.collect2$ave.red)))+
-  geom_histogram(bins = 100)
-this
-
-
-this <- ggplot(pheno.collect2,aes(as.numeric(pheno.collect2$ave.red)/as.numeric(pheno.collect2$ave.green)))+
-  geom_histogram(bins = 100)
-this
-
-
-
-this <- ggplot(pheno.collect2,aes(as.numeric(pheno.collect2$ave.red),as.numeric(pheno.collect2$ave.green)))+
-  geom_point()+
-  geom_smooth()
-this
-
-med.trait <- aggregate(as.numeric(pheno.collect2$ave.red),list(pheno.collect2$genotype),median)
-ril.ord <- med.trait$Group.1[order(med.trait$x)]
-pheno.collect2$genotype <- factor(pheno.collect2$genotype,levels = ril.ord)
-
-this <- ggplot(pheno.collect2,aes(pheno.collect2$genotype,as.numeric(pheno.collect2$ave.red)))+
-  geom_boxplot()
-this
-
-
-med.trait <- aggregate(as.numeric(pheno.collect2$ave.red)/as.numeric(pheno.collect2$ave.green),list(pheno.collect2$genotype),median)
-ril.ord <- med.trait$Group.1[order(med.trait$x)]
-pheno.collect2$genotype <- factor(pheno.collect2$genotype,levels = ril.ord)
-
-this <- ggplot(pheno.collect2,aes(pheno.collect2$genotype,log2(as.numeric(pheno.collect2$ave.red)/as.numeric(pheno.collect2$ave.green))))+
-  geom_boxplot()
-this
-
-
-#### Loop for side cam data ############################
-
-# Get all files in a list
-file.list <- list.files("output/")
-file.list <- file.list[grep("cam0side_results",file.list)]
-
-# Open one file to get dimensions
-tmp <- fromJSON(file=paste0(c("output/",file.list[1000]),collapse = ""))  # The first file opened here may not fail quality control. filling in 1000 is a crude solution
-trait.list <- NULL
-for (i in 1:length(tmp$observations)){
-  trait.list <- c(trait.list,rep(tmp$observations[[i]]$trait,1))
-}
-trait.list <- c("sample_name", trait.list)
-length(trait.list)
-# Create dataframe for observations
-pheno.collect2side <- data.frame(matrix(NA,nrow = 0,ncol = length(trait.list)), stringsAsFactors = FALSE)
-colnames(pheno.collect2side) <- trait.list
-namesCAMside <- c()
-for ( j in 1:length(file.list)){
-  tmp <- fromJSON(file=paste0(c("output/",file.list[j]),collapse = ""))
-  if( length(tmp$observations)==39){ # check if there are enough observations, so only fully scored plants are in the dataset
-    sample_name <- str_replace(file.list[j],"(^.+ - .+)_cam0.*$", "\\1") # Start by adding the sample name as trait. get the sample name from file name with 
-    sample_name <- paste(sample_name, "_0", sep = "")
-    pheno.tmp <- sample_name 
-    namesCAMside <- c(namesCAMside, sample_name)
-    for (i in 1:length(tmp$observations)){ # Loop over values and add them to vector
-      
-      ## So there are traits with more than 1 value, to prevent errors we (useing paste) concatenate those values together separated by ; (so we can split later on)
-      ## posiible issue later on is that values will be stored as text/string/characters, we need to as.numeric() them when we want to plot/do stats...
-      
-      pheno.tmp <- cbind(pheno.tmp, paste(tmp$observations[[i]]$value,collapse = ";")) # 
-      #pheno.tmp <- cbind(pheno.tmp, tmp$observations[[i]]$value)
-    }
-    # Add new observation here
-    colnames(pheno.tmp) <- trait.list
-    pheno.collect2side <- rbind(pheno.collect2side, pheno.tmp, stringsAsFactors = FALSE) # Now the pheno.tmp has only one row ;-)
-  }}
-
-
-
-
-
-
-pheno.collect2side <- data.frame(pheno.collect2side, stringsAsFactors = FALSE)
-rownames(pheno.collect2side) <- namesCAMside
-dim(pheno.collect2side)
-
-#### Final Frame ####################
-trait.listfinal <- c("sample_name", "top surface", "top convex hull", "top convex vertices", "top solidity", "top height", "top width","top perimeter",
-                     "leafs seen from top", "top number of cycles", "top longest path", "top ellipse major axis length", "top ellipse minor axis length",
-                     "top ellipse major axis angle", "top ellipse eccentricity", "top average leaf angle", "top sd leaf angle", "top average leaf length",
-                     "top sd leaf length", "top average stem angle", "top sd stem angle", "top average stem length", "top sd stem length",
-                     "side area", "side convex hull", "side convex vertices", "side solidity", "side height", "side width", "side perimeter",
-                     "side number of cycles", "side longest path", "side ellipse major axis length", "side ellipse minor axis length",
-                     "side ellipse major axis angle", "side ellipse eccentricity", "side average leaf angle", "side sd leaf angle",
-                     "side average stem angle", "side sd stem angle",
-                     "average green value", "sd green values", "average red value",  "sd red values", "average blue value", "sd blue values",
-                     "average hue value", "sd hue values", "average saturation value", "sd saturation values", "average value value", "sd value values",
-                     "average lightness value", "sd lightness values", "average green-magenta value", "sd green-magenta values",
-                     "average blue-yellow value", "sd blue-yellow values", "volume" ,"genotype")                                                         # Final phenotype list
-names.listfinal <- Reduce(intersect, list(names3D,names3Dside,names,namesVOL,namesCAMside))                                           # List of samples that abide by both the 3D definition and the cam definition 
-  
-pheno.collectfinal <- data.frame(matrix(NA,nrow = 0,ncol = length(trait.listfinal)), stringsAsFactors = FALSE)
-pheno.collectfinalCAM <- data.frame(matrix(NA,nrow = 0,ncol = length(trait.listfinal)), stringsAsFactors = FALSE)
-
-# In this loop all interesting traits will be inserted one by one.
-for (name in names.listfinal){ # The 1:1000 is a temporary subset for development
-  # First everything simple we can learn from top perspective
-  newrow <- data.frame(pheno.collect[name, "sample_name"])
-  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "area"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "convex.hull.area"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "convex.hull.vertices"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "solidity"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "height"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "width"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "perimeter"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "estimated.object.count"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "number.of.cycles"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "longest.path"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "ellipse.major.axis.length"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "ellipse.minor.axis.length"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "ellipse.major.axis.angle"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect[name, "ellipse.eccentricity"]))
-  # Now everything complex we need to get trough further calculations from top perspective
-  newrow <- data.frame(newrow, mean(abs(as.numeric(unlist(str_split(pheno.collect[name, "top_leaf_angles"], ";"))))))
-  newrow <- data.frame(newrow, sd(abs(as.numeric(unlist(str_split(pheno.collect[name, "top_leaf_angles"], ";"))))))
-  newrow <- data.frame(newrow, mean(abs(as.numeric(unlist(str_split(pheno.collect[name, "top_leaf_lengths"], ";"))))))
-  newrow <- data.frame(newrow, sd(abs(as.numeric(unlist(str_split(pheno.collect[name, "top_leaf_lengths"], ";"))))))
-  newrow <- data.frame(newrow, mean(abs(as.numeric(unlist(str_split(pheno.collect[name, "top_stem_angles"], ";"))))))
-  newrow <- data.frame(newrow, sd(abs(as.numeric(unlist(str_split(pheno.collect[name, "top_stem_angles"], ";"))))))
-  newrow <- data.frame(newrow, mean(abs(as.numeric(unlist(str_split(pheno.collect[name, "top_stem_lengths"], ";"))))))
-  newrow <- data.frame(newrow, sd(abs(as.numeric(unlist(str_split(pheno.collect[name, "top_stem_lengths"], ";"))))))
-  # Now some simply traits we see from side perspective
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "area"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "convex.hull.area"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "convex.hull.vertices"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "solidity"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "height"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "width"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "perimeter"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "number.of.cycles"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "longest.path"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "ellipse.major.axis.length"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "ellipse.minor.axis.length"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "ellipse.major.axis.angle"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect.side3D[name, "ellipse.eccentricity"]))
-  # Now everything complex we need to get trough further calculations from side perspective
-  newrow <- data.frame(newrow, mean(abs(as.numeric(unlist(str_split(pheno.collect.side3D[name, "side_leaf_angles"], ";"))))))
-  newrow <- data.frame(newrow, sd(abs(as.numeric(unlist(str_split(pheno.collect.side3D[name, "side_leaf_angles"], ";"))))))
-  newrow <- data.frame(newrow, mean(abs(as.numeric(unlist(str_split(pheno.collect.side3D[name, "side_stem_angles"], ";"))))))
-  newrow <- data.frame(newrow, sd(abs(as.numeric(unlist(str_split(pheno.collect.side3D[name, "side_stem_angles"], ";"))))))
-  # Now come the colors. For now we take the average amount of green or red in a leaf when you take the RGB values from all pixels considered plant.
-  colortemp <- t(as.numeric(unlist(str_split(pheno.collect2[name, "green.frequencies"], ";"))))  # GREEN
-  colorcount <- 0
-  colorvalues <- numeric()
-  for (i in colortemp){
-    tmp <- rep(colorcount, times = i)
-    colorvalues <- c(colorvalues, tmp)
-    colorcount <- colorcount + 1
-  }
-  newrow <- data.frame(newrow, mean(colorvalues))
-  newrow <- data.frame(newrow, sd(colorvalues))
-  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "red.frequencies"], ";")))    # RED
-  colorcount <- 0
-  colorvalues <- numeric()
-  for (i in colortemp){
-    tmp <- rep(colorcount, times = i)
-    colorvalues <- c(colorvalues, tmp)
-    colorcount <- colorcount + 1
-  }
-  newrow <- data.frame(newrow, mean(colorvalues))
-  newrow <- data.frame(newrow, sd(colorvalues))
-  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "blue.frequencies"], ";")))   # BLUE
-  colorcount <- 0
-  colorvalues <- numeric()
-  for (i in colortemp){
-    tmp <- rep(colorcount, times = i)
-    colorvalues <- c(colorvalues, tmp)
-    colorcount <- colorcount + 1
-  }
-  newrow <- data.frame(newrow, mean(colorvalues))
-  newrow <- data.frame(newrow, sd(colorvalues))
-  ## That was the RGB color space, now let's take a look at the HSV color space
-  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "hue.frequencies"], ";")))  # HUE
-  colorcount <- 0
-  colorvalues <- numeric()
-  for (i in colortemp){
-    tmp <- rep(colorcount, times = i)
-    colorvalues <- c(colorvalues, tmp)
-    colorcount <- colorcount + 1
-  }
-  newrow <- data.frame(newrow, mean(colorvalues))
-  newrow <- data.frame(newrow, sd(colorvalues))
-  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "saturation.frequencies"], ";")))  # SATURATION
-  colorcount <- 0
-  colorvalues <- numeric()
-  for (i in colortemp){
-    tmp <- rep(colorcount, times = i)
-    colorvalues <- c(colorvalues, tmp)
-    colorcount <- colorcount + 1
-  }
-  newrow <- data.frame(newrow, mean(colorvalues))
-  newrow <- data.frame(newrow, sd(colorvalues))
-  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "value.frequencies"], ";")))   # VALUE
-  colorcount <- 0
-  colorvalues <- numeric()
-  for (i in colortemp){
-    tmp <- rep(colorcount, times = i)
-    colorvalues <- c(colorvalues, tmp)
-    colorcount <- colorcount + 1
-  }
-  newrow <- data.frame(newrow, mean(colorvalues))
-  newrow <- data.frame(newrow, sd(colorvalues))
-  # Now pure for completionist sake we can also add the CIELAB color space as we measured it anyway
-  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "lightness.frequencies"], ";")))   # LIGHTNESS
-  colorcount <- 0
-  colorvalues <- numeric()
-  for (i in colortemp){
-    tmp <- rep(colorcount, times = i)
-    colorvalues <- c(colorvalues, tmp)
-    colorcount <- colorcount + 1
-  }
-  newrow <- data.frame(newrow, mean(colorvalues))
-  newrow <- data.frame(newrow, sd(colorvalues))
-  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "green.magenta.frequencies"], ";")))  # GREEN_MAGENTA
-  colorcount <- 0
-  colorvalues <- numeric()
-  for (i in colortemp){
-    tmp <- rep(colorcount, times = i)
-    colorvalues <- c(colorvalues, tmp)
-    colorcount <- colorcount + 1
-  }
-  newrow <- data.frame(newrow, mean(colorvalues))
-  newrow <- data.frame(newrow, sd(colorvalues))
-  
-  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "blue.yellow.frequencies"], ";")))  # BLUE_YELLOW
-  colorcount <- 0
-  colorvalues <- numeric()
-  for (i in colortemp){
-    tmp <- rep(colorcount, times = i)
-    colorvalues <- c(colorvalues, tmp)
-    colorcount <- colorcount + 1
-  }
-  newrow <- data.frame(newrow, mean(colorvalues))
-  newrow <- data.frame(newrow, sd(colorvalues))
-
-  ## Now lastly the volume and genotype  
-  newrow <- data.frame(newrow, pheno.volumes[name, "Volume"])
-  newrow <- data.frame(newrow, pheno.collect[name, "genotype"])
-  # bind this newrow to the final dataframe
-  print(name) # Just to keep track where you are
-  pheno.collectfinal <- rbind(pheno.collectfinal, newrow, stringsAsFactors = FALSE)
-  
-
-}
-colnames(pheno.collectfinal) <- trait.listfinal
-rownames(pheno.collectfinal) <- names.listfinal
-
-pheno.collectfinal[1:5, 2:length(trait.listfinal)]
-#### END OF FINAL FRAME WITH 3D data now pure cam data ############################
-
-# In this loop all interesting traits will be inserted one by one.
-for (name in names.listfinal){ # The 1:1000 is a temporary subset for development
-  # First everything simple we can learn from top perspective
-  newrow <- data.frame(pheno.collect[name, "sample_name"])
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2[name, "area"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2[name, "convex.hull.area"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2[name, "convex.hull.vertices"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2[name, "solidity"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2[name, "height"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2[name, "width"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2[name, "perimeter"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2[name, "estimated.object.count"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2[name, "number.of.cycles"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2[name, "longest.path"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2[name, "ellipse.major.axis.length"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2[name, "ellipse.minor.axis.length"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2[name, "ellipse.major.axis.angle"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2[name, "ellipse.eccentricity"]))
-  # Now everything complex we need to get trough further calculations from top perspective
-  newrow <- data.frame(newrow, mean(abs(as.numeric(unlist(str_split(pheno.collect2[name, "top_leaf_angles"], ";"))))))
-  newrow <- data.frame(newrow, sd(abs(as.numeric(unlist(str_split(pheno.collect2[name, "top_leaf_angles"], ";"))))))
-  newrow <- data.frame(newrow, mean(abs(as.numeric(unlist(str_split(pheno.collect2[name, "top_leaf_lengths"], ";"))))))
-  newrow <- data.frame(newrow, sd(abs(as.numeric(unlist(str_split(pheno.collect2[name, "top_leaf_lengths"], ";"))))))
-  newrow <- data.frame(newrow, mean(abs(as.numeric(unlist(str_split(pheno.collect2[name, "top_stem_angles"], ";"))))))
-  newrow <- data.frame(newrow, sd(abs(as.numeric(unlist(str_split(pheno.collect2[name, "top_stem_angles"], ";"))))))
-  newrow <- data.frame(newrow, mean(abs(as.numeric(unlist(str_split(pheno.collect2[name, "top_stem_lengths"], ";"))))))
-  newrow <- data.frame(newrow, sd(abs(as.numeric(unlist(str_split(pheno.collect2[name, "top_stem_lengths"], ";"))))))
-  # Now some simply traits we see from side perspective
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "area"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "convex.hull.area"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "convex.hull.vertices"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "solidity"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "height"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "width"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "perimeter"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "number.of.cycles"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "longest.path"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "ellipse.major.axis.length"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "ellipse.minor.axis.length"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "ellipse.major.axis.angle"]))
-  newrow <- data.frame(newrow, as.numeric(pheno.collect2side[name, "ellipse.eccentricity"]))
-  # Now everything complex we need to get trough further calculations from side perspective
-  newrow <- data.frame(newrow, mean(abs(as.numeric(unlist(str_split(pheno.collect2side[name, "side_leaf_angles"], ";"))))))
-  newrow <- data.frame(newrow, sd(abs(as.numeric(unlist(str_split(pheno.collect2side[name, "side_leaf_angles"], ";"))))))
-  newrow <- data.frame(newrow, mean(abs(as.numeric(unlist(str_split(pheno.collect2side[name, "side_stem_angles"], ";"))))))
-  newrow <- data.frame(newrow, sd(abs(as.numeric(unlist(str_split(pheno.collect2side[name, "side_stem_angles"], ";"))))))
-  # Now come the colors. For now we take the average amount of green or red in a leaf when you take the RGB values from all pixels considered plant.
-  colortemp <- t(as.numeric(unlist(str_split(pheno.collect2[name, "green.frequencies"], ";"))))  # GREEN
-  colorcount <- 0
-  colorvalues <- numeric()
-  for (i in colortemp){
-    tmp <- rep(colorcount, times = i)
-    colorvalues <- c(colorvalues, tmp)
-    colorcount <- colorcount + 1
-  }
-  newrow <- data.frame(newrow, mean(colorvalues))
-  newrow <- data.frame(newrow, sd(colorvalues))
-  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "red.frequencies"], ";")))    # RED
-  colorcount <- 0
-  colorvalues <- numeric()
-  for (i in colortemp){
-    tmp <- rep(colorcount, times = i)
-    colorvalues <- c(colorvalues, tmp)
-    colorcount <- colorcount + 1
-  }
-  newrow <- data.frame(newrow, mean(colorvalues))
-  newrow <- data.frame(newrow, sd(colorvalues))
-  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "blue.frequencies"], ";")))   # BLUE
-  colorcount <- 0
-  colorvalues <- numeric()
-  for (i in colortemp){
-    tmp <- rep(colorcount, times = i)
-    colorvalues <- c(colorvalues, tmp)
-    colorcount <- colorcount + 1
-  }
-  newrow <- data.frame(newrow, mean(colorvalues))
-  newrow <- data.frame(newrow, sd(colorvalues))
-  ## That was the RGB color space, now let's take a look at the HSV color space
-  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "hue.frequencies"], ";")))  # HUE
-  colorcount <- 0
-  colorvalues <- numeric()
-  for (i in colortemp){
-    tmp <- rep(colorcount, times = i)
-    colorvalues <- c(colorvalues, tmp)
-    colorcount <- colorcount + 1
-  }
-  newrow <- data.frame(newrow, mean(colorvalues))
-  newrow <- data.frame(newrow, sd(colorvalues))
-  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "saturation.frequencies"], ";")))  # SATURATION
-  colorcount <- 0
-  colorvalues <- numeric()
-  for (i in colortemp){
-    tmp <- rep(colorcount, times = i)
-    colorvalues <- c(colorvalues, tmp)
-    colorcount <- colorcount + 1
-  }
-  newrow <- data.frame(newrow, mean(colorvalues))
-  newrow <- data.frame(newrow, sd(colorvalues))
-  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "value.frequencies"], ";")))   # VALUE
-  colorcount <- 0
-  colorvalues <- numeric()
-  for (i in colortemp){
-    tmp <- rep(colorcount, times = i)
-    colorvalues <- c(colorvalues, tmp)
-    colorcount <- colorcount + 1
-  }
-  newrow <- data.frame(newrow, mean(colorvalues))
-  newrow <- data.frame(newrow, sd(colorvalues))
-  # Now pure for completionist sake we can also add the CIELAB color space as we measured it anyway
-  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "lightness.frequencies"], ";")))   # LIGHTNESS
-  colorcount <- 0
-  colorvalues <- numeric()
-  for (i in colortemp){
-    tmp <- rep(colorcount, times = i)
-    colorvalues <- c(colorvalues, tmp)
-    colorcount <- colorcount + 1
-  }
-  newrow <- data.frame(newrow, mean(colorvalues))
-  newrow <- data.frame(newrow, sd(colorvalues))
-  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "green.magenta.frequencies"], ";")))  # GREEN_MAGENTA
-  colorcount <- 0
-  colorvalues <- numeric()
-  for (i in colortemp){
-    tmp <- rep(colorcount, times = i)
-    colorvalues <- c(colorvalues, tmp)
-    colorcount <- colorcount + 1
-  }
-  newrow <- data.frame(newrow, mean(colorvalues))
-  newrow <- data.frame(newrow, sd(colorvalues))
-  
-  colortemp <- as.numeric(unlist(str_split(pheno.collect2[name, "blue.yellow.frequencies"], ";")))  # BLUE_YELLOW
-  colorcount <- 0
-  colorvalues <- numeric()
-  for (i in colortemp){
-    tmp <- rep(colorcount, times = i)
-    colorvalues <- c(colorvalues, tmp)
-    colorcount <- colorcount + 1
-  }
-  newrow <- data.frame(newrow, mean(colorvalues))
-  newrow <- data.frame(newrow, sd(colorvalues))
-  
-  ## Now lastly the volume and genotype  
-  newrow <- data.frame(newrow, pheno.volumes[name, "Volume"])
-  newrow <- data.frame(newrow, pheno.collect[name, "genotype"])
-  # bind this newrow to the final dataframe
-  print(name) # Just to keep track where you are
-  pheno.collectfinalCAM <- rbind(pheno.collectfinalCAM, newrow, stringsAsFactors = FALSE)
-  
-  
-}
-colnames(pheno.collectfinal) <- trait.listfinal
-rownames(pheno.collectfinal) <- names.listfinal
-
-pheno.collectfinalCAM[1:5, 2:length(trait.listfinal)]
-
-
-#### KLAD ##########################
-  save.image("Complete_workspace.RData")
-  save(pheno.collectfinal, file = "result.Rdata")
-  save(pheno.volumes, file = "volumes.Rdata")
-  write.csv(pheno.collectfinal, file = "result.csv")
-  write.csv(pheno.volumes, file = "volumes.csv")
-  
-  finalframe <- pheno.collectfinal[complete.cases(pheno.collectfinal),]
-  #finalframe <- pheno.collectfinal[complete.cases(pheno.collectfinalCAM),]
-  write.csv(finalframe, file = "result_without_NA.csv")
-  save(finalframe, file = "result_without_NA.Rdata")
-  
-
-
-#### Nice random plots ##############
-this <- ggplot(pheno.collectfinal,aes(as.numeric(pheno.collectfinal$volume)))+
-  geom_histogram(bins = 100)
-this
-
-med.trait <- aggregate(as.numeric(pheno.collectfinal$volume),list(pheno.collectfinal$genotype),median)
-ril.ord <- med.trait$Group.1[order(med.trait$x)]
-pheno.collectfinal$genotype <- factor(pheno.collectfinal$genotype,levels = ril.ord)
-
-this <- ggplot(pheno.collectfinal,aes(pheno.collectfinal$genotype,as.numeric(pheno.collectfinal$volume)))+
-  geom_boxplot()
-this
+    #______________________________________________________________#### BEGIN CIELAB COLORSPACE WORKFLOW ###
+    # Convert RGB to LAB and extract the Blue channel
+    b = pcv.rgb2gray_lab(rgb_img=img, channel='b')
+
+    # Threshold the blue image
+    b_thresh = pcv.threshold.binary(gray_img=b, threshold=b_lower_thresh_1, max_value=b_higher_thresh_1, object_type='light') # now redundant
+    b_cnt = pcv.threshold.binary(gray_img=b, threshold=b_lower_thresh_1, max_value=b_higher_thresh_1, object_type='light')  
+    #print("thresholded on blue yellow channel")
+    # Fill small objects
+    b_cnt = pcv.fill(b_thresh, b_fill_k)        # If the fill step fails because of small objects try a smaller fill, else abort.
+    #print("Filled blue channel mask")
+
+    # Join the thresholded saturation and blue-yellow images
+    bs = pcv.logical_and(bin_img1=s_mblur, bin_img2=b_cnt)             # CHANGER OR TO AND
+
+    # Apply Mask (for VIS images, mask_color=white)
+    masked = pcv.apply_mask(rgb_img=img, mask=bs, mask_color='white')
+    #print("Masked image")
+    #Now the background is filtered away. Next step is to capture the plant.
+    # Convert RGB to LAB and extract the Green-Magenta and Blue-Yellow channels
+    #print("LAB color space")
+    masked_l = pcv.rgb2gray_lab(rgb_img=masked, channel='l')
+    masked_a = pcv.rgb2gray_lab(rgb_img=masked, channel='a')
+    masked_b = pcv.rgb2gray_lab(rgb_img=masked, channel='b')
+
+    # Threshold the LAB color space images
+    #print("LAB threshholds")
+    maskedl_thresh, maskedl_image = pcv.threshold.custom_range(rgb_img=masked_l, lower_thresh=[120], upper_thresh=[247], channel='gray')
+    maskeda_thresh, maskeda_image = pcv.threshold.custom_range(rgb_img=masked_a, lower_thresh=[0], upper_thresh=[114], channel='gray')
+    maskedb_thresh, maskedb_image = pcv.threshold.custom_range(rgb_img=masked_b, lower_thresh=[130], upper_thresh=[240], channel='gray')
+
+    # Join the thresholded saturation and blue-yellow images (AND)
+    #print("Join the thresholds")
+    ab1 = pcv.logical_and(bin_img1=maskeda_thresh, bin_img2=maskedb_thresh)
+    ab = pcv.logical_and(bin_img1=maskedl_thresh, bin_img2=ab1)
+
+    try:
+        # Fill small objects
+        ab_fill = pcv.median_blur(gray_img=ab, ksize= LAB_blur_k)
+        ab_fill = pcv.fill(bin_img=ab_fill, size=LAB_fill_k)
+        #print("final fill and blur")
+        # Apply mask (for VIS images, mask_color=white)
+        masked2 = pcv.apply_mask(rgb_img=masked, mask=ab_fill, mask_color='white')
+    
+        # Identify objects
+        id_objects, obj_hierarchy = pcv.find_objects(img=masked2, mask=ab_fill)
+    
+        # Define ROI
+        roi1, roi_hierarchy= pcv.roi.rectangle(img=masked2, x=0, y=0, h=960, w=1280)
+    
+        # Decide which objects to keep
+        roi_objects, hierarchy3, kept_mask, obj_area = pcv.roi_objects(img=img, roi_contour=roi1, 
+                                                                   roi_hierarchy=roi_hierarchy, 
+                                                                   object_contour=id_objects, 
+                                                                   obj_hierarchy=obj_hierarchy,
+                                                                   roi_type='partial')
+    
+            # Object combine kept objects
+        obj, mask = pcv.object_composition(img=img, contours=roi_objects, hierarchy=hierarchy3)
+            ############### Analysis ################
+        
+        outfile=args.outdir+"/"+filename
+
+        skeleton = pcv.morphology.skeletonize(mask)
+        try:
+            skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size= top_prune) # Prune to remove barbs
+        except: # passes plants too small to be pruned
+            skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=0) # Prune to remove barbs
+    
+        new_im = Image.fromarray(skeleton)
+        new_im.save("output//" + args.filename + "_top_skeleton.png")
+        
+        pcv.params.line_thickness = 3 # just for debugging
+        leaf_obj, other_obj = pcv.morphology.segment_sort(skel_img=skeleton, objects=segment_objects, mask=mask)
+        
+        segmented_img, segmented_obj = pcv.morphology.segment_skeleton(skel_img=skeleton)
+        new_im = Image.fromarray(segmented_img)
+        new_im.save("output//" + args.filename + "top_segmented_skeleton.png")
+        
+        cycle_img = pcv.morphology.check_cycles(skel_img=skeleton)
+        new_im = Image.fromarray(cycle_img)
+        new_im.save("output//" + args.filename + "top_cycle_skeleton.png")
+        
+        # Shape properties relative to user boundary line (optional)
+        boundary_img1 = pcv.analyze_bound_horizontal(img=img, obj=obj, mask=mask, line_position=1680)
+        new_im = Image.fromarray(boundary_img1)
+        new_im.save("output//" + args.filename + "boundary_img.png")
+        
+        if leaf_obj:
+            #print("leaf angles")
+            with HiddenPrints():
+
+                pcv.morphology.segment_angle(segmented_img = segmented_img, objects = leaf_obj)    # Absolute angles, heavily influenced by plant orientation
+                leaf_angles_values = pcv.outputs.observations['segment_angle']['value']
+                leaf_angles_labels = pcv.outputs.observations['segment_angle']['label']
+                pcv.outputs.add_observation(variable = "top_leaf_angles", trait = "top_leaf_angles",
+                                            method = "plantcv.morphology.segment_angle",
+                                            scale = "degrees", datatype = float,
+                                            value = leaf_angles_values, label = leaf_angles_labels)
+                
+                pcv.morphology.segment_tangent_angle(segmented_img = segmented_img, objects = leaf_obj, size = 20) # Tangent leaf angles, actually a way of measuring curvature
+                leaf_angles_values = pcv.outputs.observations['segment_tangent_angle']['value']
+                leaf_angles_labels = pcv.outputs.observations['segment_tangent_angle']['label']
+                pcv.outputs.add_observation(variable = "top_tangent_leaf_angles", trait = "top_tangent_leaf_angles",
+                                            method = "plantcv.morphology.segment_tangent__angle",
+                                            scale = "degrees", datatype = float,
+                                            value = leaf_angles_values, label = leaf_angles_labels)
+        if other_obj:
+            #print("stem angles")
+            with HiddenPrints():
+                
+                pcv.morphology.segment_angle(segmented_img = segmented_img, objects = other_obj)
+                stem_angles_values = pcv.outputs.observations['segment_angle']['value']
+                stem_angles_labels = pcv.outputs.observations['segment_angle']['label']
+                pcv.outputs.add_observation(variable = "top_stem_angles", trait = "top_stem_angles",
+                                            method = "plantcv.morphology.segment_angle",
+                                            scale = "degrees", datatype = float,
+                                            value = stem_angles_values, label = stem_angles_labels)
+                
+                pcv.morphology.segment_tangent_angle(segmented_img = segmented_img, objects = other_obj, size = 20)
+                stem_angles_values = pcv.outputs.observations['segment_tangent_angle']['value']
+                stem_angles_labels = pcv.outputs.observations['segment_tangent_angle']['label']
+                pcv.outputs.add_observation(variable = "top_stem_tangent_angles", trait = "top_stem_tangent_angles",
+                                            method = "plantcv.morphology.segment_tangent_angle",
+                                            scale = "degrees", datatype = float,
+                                            value = stem_angles_values, label = stem_angles_labels)
+        if segmented_obj:
+            #print("segment_angles")
+            with HiddenPrints():
+                seg_angle_img = pcv.morphology.segment_angle(segmented_img, segmented_obj)
+                new_im = Image.fromarray(seg_angle_img)
+                new_im.save("output//" + args.filename + "top_seg_angle.png")
+    
+        path_length_img = pcv.morphology.segment_path_length(segmented_img, leaf_obj)
+        leaf_length_values = pcv.outputs.observations['segment_path_length']['value']
+        leaf_length_labels = pcv.outputs.observations['segment_path_length']['value']
+    
+        pcv.outputs.add_observation(variable = "top_leaf_length", trait = "top_leaf_lengths",
+                                    method = "plantcv.morphology.segment_angle",
+                                    scale = "pixels", datatype = float,
+                                    value = leaf_length_values, label = leaf_length_labels)
+    
+        path_length_img = pcv.morphology.segment_path_length(segmented_img, other_obj)
+        stem_length_values = pcv.outputs.observations['segment_path_length']['value']
+        stem_length_labels = pcv.outputs.observations['segment_path_length']['value']
+    
+        pcv.outputs.add_observation(variable = "top_stem_length", trait = "top_stem_lengths",
+                                    method = "plantcv.morphology.segment_angle",
+                                    scale = "pixels", datatype = float,
+                                    value = stem_length_values, label = stem_length_labels)
+    
+        path_length_img = pcv.morphology.segment_path_length(segmented_img, segmented_obj)
+        new_im = Image.fromarray(path_length_img)
+        new_im.save("output//" + args.filename + "top_seg_length.png")
+        
+        # Shape properties relative to user boundary line (optional)
+        boundary_img1 = pcv.analyze_bound_horizontal(img=img, obj=obj, mask=mask, line_position=1680)
+        new_im = Image.fromarray(boundary_img1)
+        new_im.save("output//" + args.filename + "_top_boundary.png")
+        
+        # Find shape properties, output shape image (optional)
+        shape_img = pcv.analyze_object(img=img, obj=obj, mask=mask)
+        try:
+            new_im = Image.fromarray(shape_img)
+            new_im.save("output//" + args.filename + "_top_shape.png")
+        except:
+            print("non fatal shape analyze error. Shape analysis could not be drawn") # weird error that happens 1 in ~1000 pictures.
+        
+        # Find all leaf tips
+        try:
+            list_of_acute_points, point_img = pcv.acute_vertex(img, obj, 10, 80, 20)
+            new_im = Image.fromarray(point_img)
+            new_im.save("output//" + args.filename + "_top_point_img.png")
+        except:
+            print("no acute points found")
+        
+        #print("landmarks")
+        top, bottom, center_v = pcv.x_axis_pseudolandmarks(img, obj, mask)
+        left, right, center_h  = pcv.y_axis_pseudolandmarks(img, obj, mask)
+        
+        # Watershed image to find all leafs
+        analysis_image = pcv.watershed_segmentation(img, mask, 8)
+        new_im = Image.fromarray(analysis_image)
+        new_im.save("output//" + args.filename + "_leaves.png")
+        
+        # Get all curvatures
+        #print("leaf curvatures")
+        pcv.morphology.segment_curvature(segmented_img, leaf_obj)
+        leaf_curv_values = pcv.outputs.observations['segment_curvature']['value']
+        leaf_curv_labels = pcv.outputs.observations['segment_curvature']['label']
+        pcv.outputs.add_observation(variable = "top_leaf_curvature", trait = "top_leaf_curvature",
+                                    method = "plantcv.morphology.segment_curvature", scale = None,
+                                    datatype = "curve factor", value = leaf_curv_values, label = leaf_curv_labels)
+        
+
+        # Determine color properties: Histograms, Color Slices, output color analyzed histogram (optional)
+        pcv.analyze_color(rgb_img=img, mask=kept_mask, hist_plot_type='all')
+
+        
+        # Find and annotate genotype
+        GT = re.sub(pattern, replacement, filename)
+        pcv.outputs.add_observation(variable = "genotype", trait = "genotype",
+                                    method = "Regexed from the filename", scale = None,
+                                    datatype = str, value = GT, label = "GT")
+        
+        # Write shape and color data to results file
+        pcv.print_results(filename=args.result)
+
+    except:
+        print("not enough plant material found")
+        #traceback.print_exc()
+
+### Side workflow###################################################################################################################
+"MainSide() is the workflow for the grayscale sidepictures"     
+####################################################################################################################################
+
+def main_side():
+    # Setting "args"
+    fill_k_side = 1000
+    pcv.params.debug=args.debug #set debug mode
+    pcv.params.debug_outdir=args.outdir #set output directory
+
+    # Read image (readimage mode defaults to native but if image is RGBA then specify mode='rgb')
+    filename = args.image
+    img = cv2.imread(args.image, flags=0)
+    path, img_name = os.path.split(args.image)
+    img_bkgrd = cv2.imread("background.png", flags=0)
+    # Substract the background
+
+    bkg_sub_img = pcv.image_subtract(img_bkgrd, img)
+    bkg_sub_thres_img, masked_img = pcv.threshold.custom_range(rgb_img=bkg_sub_img, lower_thresh=[50], 
+                                                               upper_thresh=[255], channel='gray')
+    # Laplace filtering (identify edges based on 2nd derivative)
+    lp_img = pcv.laplace_filter(gray_img=img, ksize=1, scale=1)
+    # Lapacian image sharpening, this step will enhance the darkness of the edges detected
+    lp_shrp_img = pcv.image_subtract(gray_img1=img, gray_img2=lp_img)
+
+    # Plot histogram of grayscale values, this helps to determine thresholding value 
+    pcv.visualize.histogram(gray_img=lp_shrp_img)
+    # Sobel filtering
+    # 1st derivative sobel filtering along horizontal axis, kernel = 1)
+    # NOTE: Aperture size must be greater than the largest derivative (ksize > dx & ksize > dy) 
+    sbx_img = pcv.sobel_filter(gray_img=img, dx=1, dy=0, ksize=1)
+
+    # 1st derivative sobel filtering along vertical axis, kernel = 1)
+    sby_img = pcv.sobel_filter(gray_img=img, dx=0, dy=1, ksize=1)
+
+    # Combine the effects of both x and y filters through matrix addition
+    sb_img = pcv.image_add(gray_img1=sbx_img, gray_img2=sby_img)
+    
+    # Use a lowpass (blurring) filter to smooth sobel image
+    mblur_img = pcv.median_blur(gray_img=sb_img, ksize=3)
+    mblur_invert_img = pcv.invert(gray_img=mblur_img)
+
+    # combine the smoothed sobel image with the laplacian sharpened image
+    edge_shrp_img = pcv.image_add(gray_img1=mblur_invert_img, gray_img2=lp_shrp_img)
+
+    # Perform thresholding to generate a binary image
+    tr_es_img = pcv.threshold.binary(gray_img=edge_shrp_img, threshold=145, 
+                                     max_value=255, object_type='dark')
+
+    # Do erosion with a 3x3 kernel (ksize=3)
+    e1_img = pcv.erode(gray_img=tr_es_img, ksize=3, i=1)
+    # Bring the two object identification approaches together.
+    # Using a logical OR combine object identified by background subtraction and the object identified by derivative filter.
+    comb_img = pcv.logical_or(bin_img1=e1_img, bin_img2=bkg_sub_thres_img)
+
+    # Get masked image, Essentially identify pixels corresponding to plant and keep those.
+    masked_erd = pcv.apply_mask(rgb_img=img, mask=comb_img, mask_color='black')
+    
+    # Need to remove the edges of the image, we did that by generating a set of rectangles to mask the edges
+
+    masked1, box1_img, rect_contour1, hierarchy1 = pcv.rectangle_mask(img=img, p1=(400,850), 
+                                                                      p2=(800,960))
+    # mask the edges
+    masked2, box2_img, rect_contour2, hierarchy2 = pcv.rectangle_mask(img=img, p1=(1,1), 
+                                                                      p2=(1279,959))
+    bx12_img = pcv.logical_or(bin_img1=box1_img, bin_img2=box2_img)
+    inv_bx1234_img = bx12_img # we dont invert
+    inv_bx1234_img = pcv.fill(bin_img=inv_bx1234_img, size = fill_k_side)
+
+    edge_masked_img = pcv.apply_mask(rgb_img=masked_erd, mask=inv_bx1234_img, 
+                                     mask_color='black')
+            #print("here we create a mask")
+    mask, masked = pcv.threshold.custom_range(rgb_img=edge_masked_img, lower_thresh=[25], upper_thresh=[175], channel='gray')
+    masked = pcv.apply_mask(rgb_img=masked, mask = mask, mask_color = 'white')
+            #print("end")
+            
+    try:
+        ab_fill = pcv.fill(bin_img=mask, size=500) # Remove everything less than 500 pixels
+        #print("final fill and blur")
+        # Apply mask (for VIS images, mask_color=white)
+        masked_img = pcv.apply_mask(rgb_img=masked, mask=ab_fill, mask_color='white')
+        # Identify objects
+        id_objects,obj_hierarchy = pcv.find_objects(img=masked_img, mask=mask)
+    
+        # Define ROI
+        roi1, roi_hierarchy= pcv.roi.rectangle(img=edge_masked_img, x=100, y=100, h=800, w=1000)
+    
+        # Decide which objects to keep
+        with HiddenPrints():
+            roi_objects, hierarchy5, kept_mask, obj_area = pcv.roi_objects(img=edge_masked_img, 
+                                                                           roi_contour=roi1, 
+                                                                           roi_hierarchy=roi_hierarchy, 
+                                                                           object_contour=id_objects, 
+                                                                           obj_hierarchy=obj_hierarchy, 
+                                                                           roi_type='largest')
+        
+        rgb_img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+        obj, mask = pcv.object_composition(img=rgb_img, contours=roi_objects, hierarchy=hierarchy5)
+        
+    ### Analysis ###
+    
+        outfile=False
+        if args.writeimg==True:
+            outfile=args.outdir+"/"+filename
+    
+    
+        skeleton = pcv.morphology.skeletonize(mask)
+        try:
+            skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=side_prune) # Prune to remove barbs
+        except: # passes plants too small to be pruned
+            skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=0) # Prune to remove barbs
+        new_im = Image.fromarray(skeleton)
+        new_im.save("output//" + args.filename + "_side_skeleton.png")
+        leaf_obj, other_obj = pcv.morphology.segment_sort(skel_img=skeleton, objects=segment_objects, mask=mask)
+    
+        segmented_img, segmented_obj = pcv.morphology.segment_skeleton(skel_img=skeleton)
+        new_im = Image.fromarray(segmented_img)
+        new_im.save("output//" + args.filename + "side_segmented_skeleton.png")
+        
+        cycle_img = pcv.morphology.check_cycles(skel_img=skeleton)
+        new_im = Image.fromarray(cycle_img)
+        new_im.save("output//" + args.filename + "side_cycle_skeleton.png")
+        
+        if leaf_obj:   # If object list is not empty
+            with HiddenPrints():
+                pcv.morphology.segment_insertion_angle(skel_img = skeleton, segmented_img = segmented_img, leaf_objects = leaf_obj,
+                                                       stem_objects = other_obj, size = 5)
+                leaf_angles_values = pcv.outputs.observations['segment_insertion_angle']['value']
+                leaf_angles_labels = pcv.outputs.observations['segment_insertion_angle']['label']
+                pcv.outputs.add_observation(variable = "side_leaf_angles", trait = "side_leaf_angles",
+                                    method = "plantcv.morphology.segment_angle",
+                                    scale = "degrees", datatype = float,
+                                    value = leaf_angles_values, label = leaf_angles_labels)
+                
+                pcv.morphology.segment_tangent_angle(segmented_img = segmented_img, objects = leaf_obj, size = 20) # Tangent leaf angles, actually a way of measuring curvature
+                leaf_angles_values = pcv.outputs.observations['segment_tangent_angle']['value']
+                leaf_angles_labels = pcv.outputs.observations['segment_tangent_angle']['label']
+                pcv.outputs.add_observation(variable = "side_tangent_leaf_angles", trait = "side_tangent_leaf_angles",
+                                            method = "plantcv.morphology.segment_tangent__angle",
+                                            scale = "degrees", datatype = float,
+                                            value = leaf_angles_values, label = leaf_angles_labels)
+                
+        if other_obj:   # If object list is not empty
+            with HiddenPrints():
+                pcv.morphology.segment_angle(segmented_img = segmented_img, objects = other_obj)
+                stem_angles_values = pcv.outputs.observations['segment_angle']['value']
+                stem_angles_labels = pcv.outputs.observations['segment_angle']['label']
+                pcv.outputs.add_observation(variable = "side_stem_angles", trait = "side_stem_angles",
+                                            method = "plantcv.morphology.segment_angle",
+                                            scale = "degrees", datatype = float,
+                                            value = stem_angles_values, label = stem_angles_labels)
+                
+                pcv.morphology.segment_tangent_angle(segmented_img = segmented_img, objects = other_obj, size = 20)
+                stem_angles_values = pcv.outputs.observations['segment_tangent_angle']['value']
+                stem_angles_labels = pcv.outputs.observations['segment_tangent_angle']['label']
+                pcv.outputs.add_observation(variable = "side_tangent_stem_angles", trait = "side_tangent_stem_angles",
+                                            method = "plantcv.morphology.segment_tangent_angle",
+                                            scale = "degrees", datatype = float,
+                                            value = stem_angles_values, label = stem_angles_labels)
+                
+        if segmented_obj:
+            with HiddenPrints():
+                seg_angle_img = pcv.morphology.segment_angle(segmented_img, segmented_obj)
+                new_im = Image.fromarray(seg_angle_img)
+                new_im.save("output//" + args.filename + "side_seg_angle.png")
+        
+        path_length_img = pcv.morphology.segment_path_length(segmented_img, segmented_obj)
+        new_im = Image.fromarray(path_length_img)
+        new_im.save("output//" + args.filename + "side_seg_length.png")
+        
+        path_length_img = pcv.morphology.segment_path_length(segmented_img, leaf_obj)
+        leaf_length_values = pcv.outputs.observations['segment_path_length']['value']
+        leaf_length_labels = pcv.outputs.observations['segment_path_length']['value']
+    
+        pcv.outputs.add_observation(variable = "side_leaf_length", trait = "side_leaf_lengths",
+                                    method = "plantcv.morphology.segment_angle",
+                                    scale = "pixels", datatype = float,
+                                    value = leaf_length_values, label = leaf_length_labels)
+    
+        path_length_img = pcv.morphology.segment_path_length(segmented_img, other_obj)
+        stem_length_values = pcv.outputs.observations['segment_path_length']['value']
+        stem_length_labels = pcv.outputs.observations['segment_path_length']['value']
+    
+        pcv.outputs.add_observation(variable = "side_stem_length", trait = "side_stem_lengths",
+                                    method = "plantcv.morphology.segment_angle",
+                                    scale = "pixels", datatype = float,
+                                    value = stem_length_values, label = stem_length_labels)
+        
+        # Shape properties relative to user boundary line (optional)
+        boundary_img1 = pcv.analyze_bound_horizontal(img=img, obj=obj, mask=mask, line_position=1680)
+        new_im = Image.fromarray(boundary_img1)
+        new_im.save("output//" + args.filename + "_side_boundary.png")
+    
+        # Find shape properties, output shape image (optional)
+        shape_img = pcv.analyze_object(img=img, obj=obj, mask=mask)
+        try:
+            new_im = Image.fromarray(shape_img)
+            new_im.save("output//" + args.filename + "_side_shape.png")
+        except:
+            print("non fatal shape analyze error. Shape analysis could not be drawn") # weird error that happens 1 in ~1000 pictures.
+        
+        # Find all leaf tips
+        try:
+            list_of_acute_points, point_img = pcv.acute_vertex(img, obj, 20, 80, 40)
+            new_im = Image.fromarray(point_img)
+            new_im.save("output//" + args.filename + "_side_point_img.png")
+        except:
+            print("no acute points found")
+    
+        nir_hist = pcv.analyze_nir_intensity(gray_img=img, mask=kept_mask, 
+                                             bins=256, histplot=True)
+    
+        top, bottom, center_v = pcv.x_axis_pseudolandmarks(img, obj, mask)
+        left, right, center_h  = pcv.y_axis_pseudolandmarks(img, obj, mask)
+    
+        # Get all curvatures
+        #print("leaf curvatures")
+        pcv.morphology.segment_curvature(segmented_img, leaf_obj)
+        leaf_curv_values = pcv.outputs.observations['segment_curvature']['value']
+        leaf_curv_labels = pcv.outputs.observations['segment_curvature']['label']
+        pcv.outputs.add_observation(variable = "top_leaf_curvature", trait = "top_leaf_curvature",
+                                    method = "plantcv.morphology.segment_curvature", scale = None,
+                                    datatype = "curve factor", value = leaf_curv_values, label = leaf_curv_labels)
+    
+        GT = re.sub(pattern, replacement, filename)
+        pcv.outputs.add_observation(variable = "genotype", trait = "genotype",
+                                    method = "Regexed from the filename", scale = None,
+                                    datatype = str, value = GT, label = "GT")
+    
+        # Write shape and nir data to results file
+        pcv.print_results(filename=args.result)
+    except:
+        print("not enough plant material found or unclear silhouette")
+        #traceback.print_exc()
+
+### 3D workflow###################################################################################################################
+"Silhouette_top() is the workflow for the 3d DATA"     
+##################################################################################################################################
+def workflow_3d():
+    "First we draw the picture from the 3D data"
+    x = []
+    y = []
+    z = []
+    image_top = Image.new("RGB", (width, height), color = 'white')
+    draw = ImageDraw.Draw(image_top)
+    data_3d = open(args.image, "r")
+    for line in data_3d:
+        line = line.split(",")
+        y.append(int(line[0]))
+        x.append(int(line[1]))
+        z.append(int(line[2]))
+        
+    i = 0
+    for point_x in x:
+        point_y = y[i]
+        draw.rectangle([point_x, point_y, point_x, point_y], fill = "black")
+        #rectange takes input [x0, y0, x1, y1]
+        i += 1
+    image_top.save("output//" + args.filename + "top_3D.png")
+    
+    image_side = Image.new("RGB", (width, height), color = 'white')
+    draw = ImageDraw.Draw(image_side)
+    i = 0
+    for point_y in y:
+        point_z = z[i]
+        draw.rectangle([point_z, point_y, point_z, point_y], fill = "black")
+        #rectange takes input [x0, y0, x1, y1]
+        i += 1
+    image_side = image_side.rotate(90)
+    image_side.save("output//" + args.filename + "side_3D.png")
+    
+                                                # We have now drawn the images, time to move on to analysis
+    
+    args.image = "output//" + args.filename + "top_3D.png"
+    # Get options
+    pcv.params.debug=args.debug #set debug mode
+    pcv.params.debug_outdir=args.outdir #set output directory
+
+    pcv.params.debug = args.debug  # set debug mode
+    pcv.params.debug_outdir = args.outdir  # set output directory
+
+    # Read image
+    img, path, filename = pcv.readimage(filename=args.image)
+    
+    v = pcv.rgb2gray_hsv(rgb_img=img, channel='v')
+    v_thresh, maskedv_image = pcv.threshold.custom_range(rgb_img=v, lower_thresh=[0], upper_thresh=[200], channel='gray')
+    
+    id_objects, obj_hierarchy = pcv.find_objects(img=maskedv_image, mask=v_thresh)
+    
+    # Define ROI
+    roi1, roi_hierarchy= pcv.roi.rectangle(img=maskedv_image, x=0, y=0, h=height, w=width)
+    
+    # Decide which objects to keep
+    roi_objects, hierarchy3, kept_mask, obj_area = pcv.roi_objects(img=img, roi_contour=roi1, 
+                                                               roi_hierarchy=roi_hierarchy, 
+                                                               object_contour=id_objects, 
+                                                               obj_hierarchy=obj_hierarchy,
+                                                               roi_type='partial')
+    
+    obj, mask = pcv.object_composition(img=img, contours=roi_objects, hierarchy=hierarchy3)
+    outfile=args.outdir+"/"+filename
+        ##### Analysis part ####
+    skeleton = pcv.morphology.skeletonize(mask)
+    try:
+        try:
+            skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=5 * top_prune) # Prune to remove barbs
+        except: # passes plants too small to be pruned
+            skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=0) # Prune to remove barbs
+    
+        new_im = Image.fromarray(skeleton)
+        new_im.save("output//" + args.filename + "_top_skeleton.png")
+        
+        pcv.params.line_thickness = 3 # just for debugging
+        leaf_obj, other_obj = pcv.morphology.segment_sort(skel_img=skeleton, objects=segment_objects, mask=mask)
+        
+        segmented_img, segmented_obj = pcv.morphology.segment_skeleton(skel_img=skeleton)
+        new_im = Image.fromarray(segmented_img)
+        new_im.save("output//" + args.filename + "top_segmented_skeleton.png")
+        
+        cycle_img = pcv.morphology.check_cycles(skel_img=skeleton)
+        new_im = Image.fromarray(cycle_img)
+        new_im.save("output//" + args.filename + "top_cycle_skeleton.png")
+    
+        if leaf_obj:
+            with HiddenPrints():
+                pcv.morphology.segment_angle(segmented_img = segmented_img, objects = leaf_obj)
+                stem_angles_values = pcv.outputs.observations['segment_angle']['value']
+                stem_angles_labels = pcv.outputs.observations['segment_angle']['label']
+                pcv.outputs.add_observation(variable = "top_leaf_angles", trait = "top_leaf_angles",
+                                            method = "plantcv.morphology.segment_angle",
+                                            scale = "degrees", datatype = float,
+                                            value = stem_angles_values, label = stem_angles_labels)
+                
+                pcv.morphology.segment_tangent_angle(segmented_img = segmented_img, objects = leaf_obj, size = 20)
+                leaf_angles_values = pcv.outputs.observations['segment_tangent_angle']['value']
+                leaf_angles_labels = pcv.outputs.observations['segment_tangent_angle']['label']
+                pcv.outputs.add_observation(variable = "top_leaf_tangent_angles", trait = "top_stem_tangent_angles",
+                                            method = "plantcv.morphology.segment_tangent_angle",
+                                            scale = "degrees", datatype = float,
+                                            value = leaf_angles_values, label = leaf_angles_labels)
+        if other_obj:
+            with HiddenPrints():
+                pcv.morphology.segment_angle(segmented_img = segmented_img, objects = leaf_obj)
+                stem_angles_values = pcv.outputs.observations['segment_angle']['value']
+                stem_angles_labels = pcv.outputs.observations['segment_angle']['label']
+                pcv.outputs.add_observation(variable = "top_stem_angles", trait = "top_stem_angles",
+                                            method = "plantcv.morphology.segment_angle",
+                                            scale = "degrees", datatype = float,
+                                            value = stem_angles_values, label = stem_angles_labels)
+                
+                pcv.morphology.segment_tangent_angle(segmented_img = segmented_img, objects = other_obj, size = 20)
+                stem_angles_values = pcv.outputs.observations['segment_tangent_angle']['value']
+                stem_angles_labels = pcv.outputs.observations['segment_tangent_angle']['label']
+                pcv.outputs.add_observation(variable = "top_stem_tangent_angles", trait = "top_stem_tangent_angles",
+                                            method = "plantcv.morphology.segment_tangent_angle",
+                                            scale = "degrees", datatype = float,
+                                            value = stem_angles_values, label = stem_angles_labels)
+        if segmented_obj:
+            with HiddenPrints():
+                seg_angle_img = pcv.morphology.segment_angle(segmented_img, segmented_obj)
+                new_im = Image.fromarray(seg_angle_img)
+                new_im.save("output//" + args.filename + "top_seg_angle.png")
+    
+        path_length_img = pcv.morphology.segment_path_length(segmented_img, leaf_obj)
+        leaf_length_values = pcv.outputs.observations['segment_path_length']['value']
+        leaf_length_labels = pcv.outputs.observations['segment_path_length']['value']
+        pcv.outputs.add_observation(variable = "top_leaf_length", trait = "top_leaf_lengths",
+                                    method = "plantcv.morphology.segment_angle",
+                                    scale = "pixels", datatype = float,
+                                    value = leaf_length_values, label = leaf_length_labels)
+    
+        path_length_img = pcv.morphology.segment_path_length(segmented_img, other_obj)
+        stem_length_values = pcv.outputs.observations['segment_path_length']['value']
+        stem_length_labels = pcv.outputs.observations['segment_path_length']['value']
+        pcv.outputs.add_observation(variable = "top_stem_length", trait = "top_stem_lengths",
+                                    method = "plantcv.morphology.segment_angle",
+                                    scale = "pixels", datatype = float,
+                                    value = stem_length_values, label = stem_length_labels)
+    
+        path_length_img = pcv.morphology.segment_path_length(segmented_img, segmented_obj)
+        new_im = Image.fromarray(path_length_img)
+        new_im.save("output//" + args.filename + "top_seg_length.png")
+        
+        # Shape properties relative to user boundary line (optional)
+        boundary_img1 = pcv.analyze_bound_horizontal(img=img, obj=obj, mask=mask, line_position=1680)
+        new_im = Image.fromarray(boundary_img1)
+        new_im.save("output//" + args.filename + "_top_boundary.png")
+    
+        # Find shape properties, output shape image (optional)
+        shape_img = pcv.analyze_object(img=img, obj=obj, mask=mask)
+        try:
+            new_im = Image.fromarray(shape_img)
+            new_im.save("output//" + args.filename + "_top_shape.png")
+        except:
+            print("non fatal shape analyze error. Shape analysis could not be drawn") # weird error that happens 1 in ~1000 pictures.
+        
+        # Find all leaf tips
+        try:
+            list_of_acute_points, point_img = pcv.acute_vertex(img, obj, 10, 80, 20)
+            new_im = Image.fromarray(point_img)
+            new_im.save("output//" + args.filename + "_top_point_img.png")
+        except:
+            print("no acute points found")
+        
+        # Watershed image to find all leafs
+        analysis_image = pcv.watershed_segmentation(img, mask, 8)
+        new_im = Image.fromarray(analysis_image)
+        new_im.save("output//" + args.filename + "_leaves.png")
+            
+        top, bottom, center_v = pcv.x_axis_pseudolandmarks(img, obj, mask)
+        left, right, center_h  = pcv.y_axis_pseudolandmarks(img, obj, mask)
+        
+        
+        # In the test sample the 3D had too low of a resolution to measure curvature, this may be different for other samples
+        # Get all curvatures
+        #print("leaf curvatures")
+        #pcv.morphology.segment_curvature(segmented_img, leaf_obj)
+        #leaf_curv_values = pcv.outputs.observations['segment_curvature']['value']
+        #leaf_curv_labels = pcv.outputs.observations['segment_curvature']['label']
+        #pcv.outputs.add_observation(variable = "top_leaf_curvature", trait = "top_leaf_curvature",
+        #                            method = "plantcv.morphology.segment_curvature", scale = None,
+        #                            datatype = "curve factor", value = leaf_curv_values, label = leaf_curv_labels)
+        
+        GT = re.sub(pattern_3d_file, replacement, files_names[file_counter])
+        pcv.outputs.add_observation(variable = "genotype", trait = "genotype",
+                                    method = "Regexed from the filename", scale = None,
+                                    datatype = str, value = GT, label = "GT")
+        
+        # Write shape and color data to results file
+        pcv.print_results(filename=args.result)
+    except:
+        print("unclear top skeleton")
+        #traceback.print_exc()
+    #   #   #   #   #   #   #   #   #   #    # Now do approximately the same for the side pic
+    
+    pcv.outputs.clear()
+    args.image = ("output//" + args.filename + "side_3D.png")
+    # Get options
+    pcv.params.debug=args.debug #set debug mode
+    pcv.params.debug_outdir=args.outdir #set output directory
+
+    pcv.params.debug = args.debug  # set debug mode
+    pcv.params.debug_outdir = args.outdir  # set output directory
+
+    # Read image
+    img, path, filename = pcv.readimage(filename=args.image)
+    
+    v = pcv.rgb2gray_hsv(rgb_img=img, channel='v')
+    v_thresh, maskedv_image = pcv.threshold.custom_range(rgb_img=v, lower_thresh=[0], upper_thresh=[200], channel='gray')
+    
+    id_objects, obj_hierarchy = pcv.find_objects(img=maskedv_image, mask=v_thresh)
+    
+    # Define ROI
+    roi1, roi_hierarchy= pcv.roi.rectangle(img=maskedv_image, x=0, y=0, h=height, w=width)
+    
+    # Decide which objects to keep
+    roi_objects, hierarchy3, kept_mask, obj_area = pcv.roi_objects(img=img, roi_contour=roi1, 
+                                                               roi_hierarchy=roi_hierarchy, 
+                                                               object_contour=id_objects, 
+                                                               obj_hierarchy=obj_hierarchy,
+                                                               roi_type='partial')
+    
+    obj, mask = pcv.object_composition(img=img, contours=roi_objects, hierarchy=hierarchy3)
+    outfile=args.outdir+"/"+filename
+    
+    try:
+        skeleton = pcv.morphology.skeletonize(mask)
+        try:
+            skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=side_prune) # Prune to remove barbs
+        except: # passes plants too small to be pruned
+            skeleton, segmented_img, segment_objects = pcv.morphology.prune(skel_img=skeleton, size=0) # Prune to remove barbs
+        new_im = Image.fromarray(skeleton)
+        new_im.save("output//" + args.filename + "_side_skeleton.png")
+        leaf_obj, other_obj = pcv.morphology.segment_sort(skel_img=skeleton, objects=segment_objects, mask=mask)
+    
+        segmented_img, segmented_obj = pcv.morphology.segment_skeleton(skel_img=skeleton)
+        new_im = Image.fromarray(segmented_img)
+        new_im.save("output//" + args.filename + "side_segmented_skeleton.png")
+        
+        cycle_img = pcv.morphology.check_cycles(skel_img=skeleton)
+        new_im = Image.fromarray(cycle_img)
+        new_im.save("output//" + args.filename + "side_cycle_skeleton.png")
+        
+        
+        
+        if leaf_obj:   # If object list is not empty
+            with HiddenPrints():
+                pcv.morphology.segment_insertion_angle(skel_img = skeleton, segmented_img = segmented_img, leaf_objects = leaf_obj,
+                                                       stem_objects = other_obj, size = 5)
+                leaf_angles_values = pcv.outputs.observations['segment_insertion_angle']['value']
+                leaf_angles_labels = pcv.outputs.observations['segment_insertion_angle']['label']
+                pcv.outputs.add_observation(variable = "side_leaf_angles", trait = "side_leaf_angles",
+                                    method = "plantcv.morphology.segment_angle",
+                                    scale = "degrees", datatype = float,
+                                    value = leaf_angles_values, label = leaf_angles_labels)
+                
+                pcv.morphology.segment_tangent_angle(segmented_img = segmented_img, objects = leaf_obj, size = 20) # Tangent leaf angles, actually a way of measuring curvature
+                leaf_angles_values = pcv.outputs.observations['segment_tangent_angle']['value']
+                leaf_angles_labels = pcv.outputs.observations['segment_tangent_angle']['label']
+                pcv.outputs.add_observation(variable = "side_tangent_leaf_angles", trait = "side_tangent_leaf_angles",
+                                            method = "plantcv.morphology.segment_tangent__angle",
+                                            scale = "degrees", datatype = float,
+                                            value = leaf_angles_values, label = leaf_angles_labels)
+                
+        if other_obj:   # If object list is not empty
+            with HiddenPrints():
+                pcv.morphology.segment_angle(segmented_img = segmented_img, objects = other_obj)
+                stem_angles_values = pcv.outputs.observations['segment_angle']['value']
+                stem_angles_labels = pcv.outputs.observations['segment_angle']['label']
+                pcv.outputs.add_observation(variable = "side_stem_angles", trait = "side_stem_angles",
+                                            method = "plantcv.morphology.segment_angle",
+                                            scale = "degrees", datatype = float,
+                                            value = stem_angles_values, label = stem_angles_labels)
+                
+                pcv.morphology.segment_tangent_angle(segmented_img = segmented_img, objects = other_obj, size = 20)
+                stem_angles_values = pcv.outputs.observations['segment_tangent_angle']['value']
+                stem_angles_labels = pcv.outputs.observations['segment_tangent_angle']['label']
+                pcv.outputs.add_observation(variable = "side_tangent_stem_angles", trait = "side_tangent_stem_angles",
+                                            method = "plantcv.morphology.segment_tangent_angle",
+                                            scale = "degrees", datatype = float,
+                                            value = stem_angles_values, label = stem_angles_labels)
+        if segmented_obj:
+            with HiddenPrints():
+                pcv.morphology.segment_angle(segmented_img, segmented_obj)
+                #new_im = Image.fromarray(seg_angle_img)
+                #new_im.save("output//" + args.filename + "side_seg_angle.png")
+        
+        path_length_img = pcv.morphology.segment_path_length(segmented_img, segmented_obj)
+        new_im = Image.fromarray(path_length_img)
+        new_im.save("output//" + args.filename + "side_seg_length.png")
+        
+        path_length_img = pcv.morphology.segment_path_length(segmented_img, leaf_obj)
+        leaf_length_values = pcv.outputs.observations['segment_path_length']['value']
+        leaf_length_labels = pcv.outputs.observations['segment_path_length']['value']
+    
+        pcv.outputs.add_observation(variable = "side_leaf_length", trait = "side_leaf_lengths",
+                                    method = "plantcv.morphology.segment_angle",
+                                    scale = "pixels", datatype = float,
+                                    value = leaf_length_values, label = leaf_length_labels)
+    
+        path_length_img = pcv.morphology.segment_path_length(segmented_img, other_obj)
+        stem_length_values = pcv.outputs.observations['segment_path_length']['value']
+        stem_length_labels = pcv.outputs.observations['segment_path_length']['value']
+    
+        pcv.outputs.add_observation(variable = "side_stem_length", trait = "side_stem_lengths",
+                                    method = "plantcv.morphology.segment_angle",
+                                    scale = "pixels", datatype = float,
+                                    value = stem_length_values, label = stem_length_labels)
+        
+        # Shape properties relative to user boundary line (optional)
+        boundary_img1 = pcv.analyze_bound_horizontal(img=img, obj=obj, mask=mask, line_position=1680)
+        new_im = Image.fromarray(boundary_img1)
+        new_im.save("output//" + args.filename + "_side_boundary.png")
+    
+        # Find shape properties, output shape image (optional)
+        shape_img = pcv.analyze_object(img=img, obj=obj, mask=mask)
+        try:
+            new_im = Image.fromarray(shape_img)
+            new_im.save("output//" + args.filename + "_side_shape.png")
+        except:
+            print("non fatal shape analyze error. Shape analysis could not be drawn") # weird error that happens 1 in ~1000 pictures.
+        
+        # Find all leaf tips
+        try:
+            list_of_acute_points, point_img = pcv.acute_vertex(img, obj, 20, 80, 40)
+            new_im = Image.fromarray(point_img)
+            new_im.save("output//" + args.filename + "_side_point_img.png")
+        except:
+            print("no acute points found")
+    
+        top, bottom, center_v = pcv.x_axis_pseudolandmarks(img, obj, mask)
+        left, right, center_h  = pcv.y_axis_pseudolandmarks(img, obj, mask)
+    
+        
+        # In the test sample the 3D had too low of a resolution to measure curvature, this may be different for other samples
+        # Get all curvatures
+        # print("leaf curvatures")
+        #pcv.morphology.segment_curvature(segmented_img, leaf_obj)
+        #leaf_curv_values = pcv.outputs.observations['segment_curvature']['value']
+        #leaf_curv_labels = pcv.outputs.observations['segment_curvature']['label']
+        #pcv.outputs.add_observation(variable = "top_leaf_curvature", trait = "top_leaf_curvature",
+        #                            method = "plantcv.morphology.segment_curvature", scale = None,
+        #                            datatype = "curve factor", value = leaf_curv_values, label = leaf_curv_labels)
+        
+        GT = re.sub(pattern_3d_file, replacement, files_names[file_counter])
+        pcv.outputs.add_observation(variable = "genotype", trait = "genotype",
+                                    method = "Regexed from the filename", scale = None,
+                                    datatype = str, value = GT, label = "GT")
+        #Write shape and color data to results file
+        pcv.print_results(filename=args.result_side)
+    except:
+        print("unclear side skeleton")
+        #traceback.print_exc()
+
+
+
+
+    
+### Do on all data ###############################################################################################################
+"To perform the script on all data set do_all to True and do_subset to False"  
+##################################################################################################################################
+    
+do_all = True
+if do_all == True:      
+    wd = os.getcwd()
+    args.debug = "None"
+    top_files = []          # absolute paths uses for processing
+    top_files_names = []    # The names used for storing 
+    temp = glob.glob("input//*cam9.png")
+    for item in temp:
+        top_files_names.append(os.path.basename(item))
+        top_files.append(os.path.join(wd, item))
+    side_files = []          # absolute paths uses for processing
+    side_files_names = []    # The names used for storing 
+    temp = glob.glob("input//*cam0.png")
+    for item in temp:
+        side_files_names.append(os.path.basename(item))
+        side_files.append(os.path.join(wd, item))
+
+        
+    file_counter = 0
+    for item in top_files[0:0]:
+        pcv.outputs.clear() # To make sure you start clean
+        args.image = item
+        args.outdir = "/output/"
+        args.result = "output//" + top_files_names[file_counter][0:-4] + "top_results.txt"
+        args.filename = top_files_names[file_counter][0:-4]
+        main()
+        file_counter += 1
+        print("handled top picture %i of %i" %(file_counter, len(top_files)))
+        
+    file_counter = 0
+    for item in side_files[0:0]:
+        pcv.outputs.clear() # To make sure you start clean
+        args.image = item
+        #background = "C:\\Users\\RensD\\OneDrive\\studie\\Master\\The_big_project\\side_perspective\\background.png"
+        background = "background.png"
+        args.outdir = "/output/"
+        args.writeimg = True
+        args.result = "output//" + side_files_names[file_counter][0:-4] + "side_results.txt"
+        args.filename = side_files_names[file_counter][0:-4]
+        main_side()
+        file_counter += 1
+        print("handled side picture %i of %i" %(file_counter, len(side_files)))
+        
+        
+    # Now the 3D workflow
+    files = []          # absolute paths uses for processing
+    files_names = []    # The names used for storing 
+    temp = glob.glob("input//*3D.csv")
+    for item in temp:
+        files_names.append(os.path.basename(item))
+        files.append(os.path.join(wd, item))
+
+    file_counter = 0
+    for item in files:
+        pcv.outputs.clear() # To make sure you start clean
+        args.image = item
+        args.outdir = "/output/"
+        args.result = "output//" + files_names[file_counter][0:-4] + "_top_results.txt"
+        args.result_side = "output//" + files_names[file_counter][0:-4] + "_side_results.txt"
+        args.filename = files_names[file_counter][0:-4]
+        workflow_3d()
+        file_counter += 1
+        print("handled dataset %i of %i" %(file_counter, len(files)))
