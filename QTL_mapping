@@ -138,7 +138,7 @@ pos <- as.numeric(gsub(".*_","",rna.map[,1]))/1e6
 #lod <- -log10(as.numeric(ppm))
 
 to.pl <- data.frame(chromo,pos,lod1, lod2, lod3)
-this <- ggplot(to.pl,aes(pos,lod3, col = "red")) +
+this <- ggplot(to.pl,aes(pos,lod1, col = "red")) +
   geom_point(size=1)+ geom_point(aes(y = lod2, col = "blue")) + geom_point(aes(y = lod3, col = "darkgreen")) +
   facet_grid(.~chromo,scale="free_x",space="free_x") +
   scale_color_manual(values = c("blue","red","darkgreen","purple","green"))+
