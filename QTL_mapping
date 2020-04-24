@@ -3,7 +3,8 @@ library(openxlsx)
 library(RcppArmadillo)
 library(ggplot2)
 library(gplots)
-setwd("~/rens2")
+#setwd("~/rens2")
+setwd("~/studie/master_project/")
 ### genetic map
 
 ## from RNA-seq SNP data
@@ -31,6 +32,7 @@ rna.map <- rbind(ch1,ch2,ch3,ch4,ch5,ch6,ch7,ch8,ch9,ch10,ch11,ch12)
 rna.map
 dim(rna.map)
 colnames(rna.map) <- gsub(".*_RIL(.*)_.*","\\1A",colnames(rna.map))
+
 rna.map
 image(t(rna.map[,-1]))
 
@@ -67,52 +69,41 @@ var(trt)
 ### data 
 
 finalframe$genotype
-mean.trait <- aggregate(finalframe$`sd hue values` ,list(finalframe$genotype),quantile)
+mean.trait <- aggregate(finalframe$`sd red values` ,list(finalframe$genotype),quantile)
 
 ### get gentic data of the RILs for which we have a trait value and get trait an map in the same order
 ril.inter <- intersect(colnames(rna.map),mean.trait$Group.1)
 ril.inter <- ril.inter[!ril.inter %in% c("308A","243A")] # remove 308 and 243 as they do not have enough observations
 use.map <- rna.map[,ril.inter]
+marker.map = t(use.map) # This lien should really be in the function itself somehow
 use.trt <- mean.trait$x[,3]
 names(use.trt) <- as.character(mean.trait$Group.1)
 use.trt <- use.trt[ril.inter]
 use.trt
 
+
 ###FAST MAP
 
 ## script (this makes use of the library(RcppArmadillo) specifically the fastLm() function)
 
-fast.map <- function(xm,gxpr){
-  ok <- fastLm(gxpr~xm)
-  pval <- pt(abs(ok$coefficients)/ok$stderr,ok$df.residual,lower.tail = F) * 2
-  pval <- pval[2]
-  SSyy <- sum(abs(gxpr-mean(gxpr))^2)
-  SSE <- sum(abs(ok$residuals)^2) 
-  R2 <- (SSyy-SSE)/SSyy
-  n = length(ok$fitted.values)
-  k = length(ok$coefficients)-1
-  R2.adj <- 1-(SSE/SSyy)*(n-1)/(n-(k+1))
-  out <- c(pval) #,R2,R2.adj)
-}
 
-fast.map2 <- function(xm,gxpr){
-  ok <- fastLm(gxpr~xm + marker.map[,first_locus])
-  pval <- pt(abs(ok$coefficients)/ok$stderr,ok$df.residual,lower.tail = F) * 2
-  pval <- pval[2]         # We only want to take the peak corresponding to the secondary peak
-  SSyy <- sum(abs(gxpr-mean(gxpr))^2)
-  SSE <- sum(abs(ok$residuals)^2) 
-  R2 <- (SSyy-SSE)/SSyy
-  n = length(ok$fitted.values)
-  k = length(ok$coefficients)-1
-  R2.adj <- 1-(SSE/SSyy)*(n-1)/(n-(k+1))
-  out <- c(pval) #,R2,R2.adj) 
-}
-
-fast.map2.5 <- function(xm,gxpr){
-  ok <- fastLm(gxpr~xm + marker.map[,second_locus])
+fast.map <- function(variables, outcome, found_loci){
+  i = 1
+  for (loci in found_loci){
+    found_loci[i] = paste(c("marker.map[,", loci, "]"), collapse = "")
+    i <- i + 1
+  }
+  variables <- paste(c("marker.map[,", variables, "]"), collapse = "")
+  variables <- c(variables, found_loci)
+  test <- as.formula(
+    paste(outcome, 
+          paste(variables, collapse = " + "), 
+          sep = " ~ "))
+  
+  ok <- fastLm(test) # The actual test is here
   pval <- pt(abs(ok$coefficients)/ok$stderr,ok$df.residual,lower.tail = F) * 2
   pval <- pval[2]         # Now we want the original peak assuming we now declared the variation from the secondary peak
-  SSyy <- sum(abs(gxpr-mean(gxpr))^2)
+  SSyy <- sum(abs(use.trt-mean(use.trt))^2)
   SSE <- sum(abs(ok$residuals)^2) 
   R2 <- (SSyy-SSE)/SSyy
   n = length(ok$fitted.values)
@@ -121,25 +112,43 @@ fast.map2.5 <- function(xm,gxpr){
   out <- c(pval) #,R2,R2.adj)
 }
 
-marker.map = t(use.map)
-ppm <- apply(marker.map,2,fast.map,use.trt)
-lod1 <- -log10(as.numeric(ppm))
-first_locus <- which(lod1 == max(lod1))
-ppm <- apply(marker.map,2,fast.map2,use.trt)
-lod2 <- -log10(as.numeric(ppm))
-lod2[first_locus] = 0                                       # Removes the one INF point
-second_locus <- which(lod2 == max(lod2[which(lod2 != is.na(lod2))]))  # Gets the max value, does not count the NaN
-ppm <- apply(marker.map,2,fast.map2.5,use.trt)
-lod3 <- -log10(as.numeric(ppm))
-lod3[second_locus] = 0                                    # Removes the one INF point
 
-chromo <- gsub("_.*","",rna.map[,1])
+do.MQM <- function(map,use.trt, rounds){
+  marker.map = t(map)
+  use.trt <- use.trt
+  positions <- matrix(c(1:dim(marker.map)[2]))  # New marker map for easier use by the function
+  found_loci <- c(rep(NULL,rounds))
+  lods <- list()
+  final.lods <- list()
+  
+  for (i in 1:rounds){
+    ppm <- apply(positions,1,fast.map,"use.trt", found_loci)
+    lods[[i]] <- -log10(as.numeric(ppm))
+    lods[[i]][found_loci[-i]] = 0
+    found_loci[i] <- which(lods[[i]] == max(lods[[i]]))
+  }
+  
+  # Now we have our loci we should see what the individual significance is when you assume all other loci
+  
+  for (i in 1:rounds){
+    ppm <- apply(positions,1,fast.map,"use.trt", found_loci[-i])
+    final.lods[[i]] <- -log10(as.numeric(ppm))
+    final.lods[[i]][found_loci[-i]] = 0 
+  }
+  
+  return(final.lods)
+}
+
+final.lods <- do.MQM(use.map, use.trt, 5)
+
+chromo <- gsub("_.*","",rna.map[,1]) # now to plot
 pos <- as.numeric(gsub(".*_","",rna.map[,1]))/1e6
-#lod <- -log10(as.numeric(ppm))
-
-to.pl <- data.frame(chromo,pos,lod1, lod2, lod3)
-this <- ggplot(to.pl,aes(pos,lod1, col = "red")) +
-  geom_point(size=1)+ geom_point(aes(y = lod2, col = "blue")) + geom_point(aes(y = lod3, col = "darkgreen")) +
+to.pl <- data.frame(chromo,pos,final.lods[[1]], final.lods[[2]], final.lods[[3]], final.lods[[4]], final.lods[[5]])
+this <- ggplot(to.pl,aes(pos,final.lods[[1]], col = "blue")) +geom_point(size=1)+
+  geom_point(aes(y = final.lods[[2]], col = "red")) + 
+  geom_point(aes(y = final.lods[[3]], col = "darkgreen")) +
+  geom_point(aes(y = final.lods[[4]], col = "purple")) +
+  geom_point(aes(y = final.lods[[5]], col = "green")) +
   facet_grid(.~chromo,scale="free_x",space="free_x") +
   scale_color_manual(values = c("blue","red","darkgreen","purple","green"))+
   theme_light()+
@@ -147,7 +156,7 @@ this <- ggplot(to.pl,aes(pos,lod1, col = "red")) +
 this 
 
 # Now to get the position of the significant traits
-print("significant QTL on chromose")
+print("significant QTL on chromosome")
 to.pl$chromo[to.pl$lod > 3]
 print("and position")
 to.pl$pos[to.pl$lod >3]
@@ -163,18 +172,4 @@ boxplot(use.trt~as.numeric(use.map[3100,])>0.5)
 
 
 ############# END #############################
-
-
-
-#marker.map = t(use.map)
-#ppm <- apply(marker.map,2,fast.map,use.trt)
-#lod1 <- -log10(as.numeric(ppm))
-#first_locus <- which(lod1 == max(lod1))
-#ppm <- apply(marker.map,2,fast.map2,use.trt)
-#lod2 <- -log10(as.numeric(ppm))
-#lod2[which(lod2 == Inf)] <- NaN                                       # Removes the one INF point
-#second_locus <- which(lod2 == max(lod2[which(lod2 != is.na(lod2))]))  # Gets the max value, does not count the NaN
-#ppm <- apply(marker.map,2,fast.map2.5,use.trt)
-#lod3 <- -log10(as.numeric(ppm))
-#lod3[which(lod3 == Inf)] <- NaN                                       # Removes the one INF point
-
+## kladblaadje
